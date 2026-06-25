@@ -1,0 +1,8 @@
+# Python venv / bytecode (bare-bone deploy creates these in-place)
+.venv/
+__pycache__/
+*.pyc
+
+# Local SQLite database
+*.db
+seismic_monitor.db
