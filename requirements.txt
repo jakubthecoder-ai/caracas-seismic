@@ -1,0 +1,4 @@
+obspy>=1.4.0
+websockets>=12.0
+aiohttp>=3.9
+numpy

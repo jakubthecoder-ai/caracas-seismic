@@ -1,0 +1,20 @@
+services:
+  monitor:
+    build: .
+    ports:
+      - "8768:8768"
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1
+      - SEISMIC_DB_PATH=/data/seismic_monitor.db
+    volumes:
+      - seismic_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import websockets, asyncio; asyncio.run(websockets.connect('ws://localhost:8768').__aenter__())"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  seismic_data:
