@@ -58,11 +58,17 @@
   sse.addEventListener('event', function (e) {
     var d = JSON.parse(e.data);
     if (d.event) {
-      updateLastEvent(d.event);
       allEvents.push(d.event);
-      if (detailsVisible) {
-        addEventToList(d.event);
-        addEventMarkerWithFeatures(d.event, true);
+      if (d.event.type === 'waveform_alert') {
+        // STA/LTA trigger — add to waveform log
+        if (detailsVisible) addWaveformToList(d.event);
+      } else {
+        // Catalog event — update banner + event list
+        updateLastEvent(d.event);
+        if (detailsVisible) {
+          addEventToList(d.event);
+          addEventMarkerWithFeatures(d.event, true);
+        }
       }
     }
   });
@@ -506,6 +512,26 @@
     });
   }
 
+  // --- Tab switching (Events / Waveforms) ---
+  window.switchTab = function (tab) {
+    var tabE = document.getElementById('tabEvents');
+    var tabW = document.getElementById('tabWaveforms');
+    var paneE = document.getElementById('paneEvents');
+    var paneW = document.getElementById('paneWaveforms');
+    if (!tabE || !paneE) return;
+    if (tab === 'waveforms') {
+      tabE.className = 'log-tab';
+      tabW.className = 'log-tab active';
+      paneE.className = 'log-pane';
+      paneW.className = 'log-pane active';
+    } else {
+      tabE.className = 'log-tab active';
+      tabW.className = 'log-tab';
+      paneE.className = 'log-pane active';
+      paneW.className = 'log-pane';
+    }
+  };
+
   // --- Event List Update (SSE) ---
   function addEventToList(evt) {
     var list = document.getElementById('eventList');
@@ -518,6 +544,39 @@
       '<span class="place">' + (evt.place || '?') + '</span>' +
       '<span class="time">just now</span>';
     list.insertBefore(row, list.firstChild);
+    // Update count
+    var count = document.getElementById('countEvents');
+    if (count) {
+      var n = (list.querySelectorAll('.event-row') || []).length;
+      count.textContent = '(' + n + ')';
+    }
+  }
+
+  // --- Waveform Alert List Update (SSE) ---
+  function addWaveformToList(evt) {
+    var list = document.getElementById('waveformList');
+    if (!list) return;
+    var level = (evt.alert_level || 'elevated').toUpperCase();
+    var magClass = level === 'CRITICAL' ? 'mag-crit' : level === 'WARNING' ? 'mag-high' : 'mag-mid';
+    var station = evt.trigger_station || '?';
+    var cft = (evt.cft || 0).toFixed(1);
+    var nStations = (evt.coincidence_stations || []).length;
+    var row = document.createElement('div');
+    row.className = 'event-row';
+    row.innerHTML = '<span class="mag ' + magClass + '">' + level + '</span>' +
+      '<span class="place">' + station + ' \u2014 CFT ' + cft +
+      (nStations > 1 ? ' (' + nStations + ' st.)' : '') + '</span>' +
+      '<span class="time">just now</span>';
+    // Remove placeholder if present
+    var placeholder = list.querySelector('div[style]');
+    if (placeholder && placeholder.textContent === '\u2014') list.removeChild(placeholder);
+    list.insertBefore(row, list.firstChild);
+    // Update count
+    var count = document.getElementById('countWaveforms');
+    if (count) {
+      var n = (list.querySelectorAll('.event-row') || []).length;
+      count.textContent = '(' + n + ')';
+    }
   }
 
   // --- Seismogram Canvas ---

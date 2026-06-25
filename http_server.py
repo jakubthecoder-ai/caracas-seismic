@@ -388,6 +388,10 @@ class HTTPServer:
             for e in events if e.get('lat') and e.get('lon')
         ], default=str)
 
+        # Split events into catalog vs waveform alerts
+        catalog_events = [e for e in events if e.get('type') != 'waveform_alert']
+        waveform_events = [e for e in events if e.get('type') == 'waveform_alert']
+
         # Render template
         env = self._aiohttp_jinja2.get_env(self._app)
         template = env.get_template('detail_fragment.html')
@@ -395,6 +399,8 @@ class HTTPServer:
             lang=lang,
             t=lambda key, **kw: t(key, lang, **kw),
             events=events,
+            catalog_events=catalog_events,
+            waveform_events=waveform_events,
             impact=impact,
             stations=stations,
             events_json=events_json,

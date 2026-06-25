@@ -30,6 +30,19 @@
   .impact-item .label { font-size:0.7em; color:#888; text-transform:uppercase; }
   .impact-item .value { font-size:1.1em; font-weight:600; color:#e0e0e0; margin-top:2px; }
 
+  .log-tabs { display:flex; border-bottom:1px solid var(--border, #1e2230); margin-bottom:8px; }
+  .log-tab {
+    flex:1; padding:6px 8px; text-align:center; font-size:0.75em; font-weight:600;
+    cursor:pointer; border:none; background:transparent; color:#666;
+    border-bottom:2px solid transparent; transition:all 0.2s;
+  }
+  .log-tab:hover { color:#aaa; background:rgba(255,255,255,0.02); }
+  .log-tab.active { color:#44aaff; border-bottom-color:#44aaff; }
+  .log-tab .count { font-size:0.9em; color:#555; margin-left:3px; }
+  .log-tab.active .count { color:#44aaff; }
+  .log-pane { display:none; max-height:300px; overflow-y:auto; }
+  .log-pane.active { display:block; }
+
   .station-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:0.75em; color:#888; margin-top:8px; }
   .station-legend .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:3px; }
 
@@ -58,22 +71,47 @@
   <canvas id="seismogramCanvas"></canvas>
 </div>
 
-<!-- Event list -->
+<!-- Tabs: Events / Waveforms -->
 <div class="detail-section">
-  <h3>{{ t('events') }}</h3>
-  <div id="eventList">
-    {% for evt in events %}
-    <div class="event-row">
-      <span class="mag {% if evt.mag >= 6 %}mag-crit{% elif evt.mag >= 5 %}mag-high{% elif evt.mag >= 4 %}mag-mid{% else %}mag-low{% endif %}">
-        M{{ "%.1f"|format(evt.mag) }}
-      </span>
-      <span class="place">{{ evt.place or '?' }}</span>
-      <span class="time">{{ evt.time_ago }}</span>
+  <div class="log-tabs">
+    <button class="log-tab active" id="tabEvents" onclick="switchTab('events')">{{ t('events') }} <span class="count" id="countEvents">({{ catalog_events|length }})</span></button>
+    <button class="log-tab" id="tabWaveforms" onclick="switchTab('waveforms')">{{ t('waveforms') }} <span class="count" id="countWaveforms">({{ waveform_events|length }})</span></button>
+  </div>
+
+  <!-- Catalog events -->
+  <div class="log-pane active" id="paneEvents">
+    <div id="eventList">
+      {% for evt in catalog_events %}
+      <div class="event-row">
+        <span class="mag {% if evt.mag >= 6 %}mag-crit{% elif evt.mag >= 5 %}mag-high{% elif evt.mag >= 4 %}mag-mid{% else %}mag-low{% endif %}">
+          M{{ "%.1f"|format(evt.mag) }}
+        </span>
+        <span class="place">{{ evt.place or '?' }}</span>
+        <span class="time">{{ evt.time_ago }}</span>
+      </div>
+      {% endfor %}
+      {% if not catalog_events %}
+      <div style="color:#555; text-align:center; padding:20px;">{{ t('no_events') }}</div>
+      {% endif %}
     </div>
-    {% endfor %}
-    {% if not events %}
-    <div style="color:#555; text-align:center; padding:20px;">{{ t('no_events') }}</div>
-    {% endif %}
+  </div>
+
+  <!-- Waveform alerts (STA/LTA) -->
+  <div class="log-pane" id="paneWaveforms">
+    <div id="waveformList">
+      {% for evt in waveform_events %}
+      <div class="event-row">
+        <span class="mag {% if evt.alert_level == 'critical' %}mag-crit{% elif evt.alert_level == 'warning' %}mag-high{% else %}mag-mid{% endif %}">
+          {{ (evt.alert_level or 'elevated')|upper }}
+        </span>
+        <span class="place">{{ evt.trigger_station or '?' }} — CFT {{ "%.1f"|format(evt.cft or 0) }}{% if evt.coincidence_stations and evt.coincidence_stations|length > 1 %} ({{ evt.coincidence_stations|length }} {{ t('stations_label')|lower }}){% endif %}</span>
+        <span class="time">{{ evt.time_ago }}</span>
+      </div>
+      {% endfor %}
+      {% if not waveform_events %}
+      <div style="color:#555; text-align:center; padding:20px;">—</div>
+      {% endif %}
+    </div>
   </div>
 </div>
 
