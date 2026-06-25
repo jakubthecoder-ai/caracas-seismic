@@ -218,10 +218,20 @@
       maxZoom: 15,
     }).addTo(map);
 
-    // --- Caracas marker (bright green, prominent) ---
-    L.circleMarker([10.5, -66.9], {
-      radius: 8, color: '#00ff88', fillColor: '#00ff88', fillOpacity: 0.9, weight: 2,
-    }).addTo(map).bindPopup('<strong>CARACAS</strong><br>' + (window.I18N.monitor_target || 'Monitoring target'));
+    // --- Caracas marker (crosshair + label, clearly distinct from earthquake dots) ---
+    var caracasIcon = L.divIcon({
+      className: 'caracas-marker',
+      html: '<div style="position:relative;width:40px;height:40px;">' +
+        '<div style="position:absolute;left:18px;top:0;width:2px;height:40px;background:#00ff88;opacity:0.5;"></div>' +
+        '<div style="position:absolute;top:18px;left:0;width:40px;height:2px;background:#00ff88;opacity:0.5;"></div>' +
+        '<div style="position:absolute;left:12px;top:12px;width:14px;height:14px;border:2px solid #00ff88;border-radius:50%;background:rgba(0,255,136,0.15);"></div>' +
+        '<div style="position:absolute;top:42px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:11px;font-weight:700;color:#00ff88;font-family:monospace;text-shadow:0 0 4px #000,0 0 8px #000;letter-spacing:1px;">CARACAS</div>' +
+        '</div>',
+      iconSize: [40, 56],
+      iconAnchor: [20, 20],
+    });
+    L.marker([10.5, -66.9], { icon: caracasIcon, interactive: true, zIndexOffset: 1000 })
+      .addTo(map).bindPopup('<strong>CARACAS</strong><br>' + (window.I18N.monitor_target || 'Monitoring target'));
 
     // --- Distance rings around Caracas ---
     L.circle([10.5, -66.9], {
@@ -284,74 +294,100 @@
     if (!map || !window.L) return;
     var mag = evt.mag || 0;
     var now = Date.now();
-    var eventTime = evt.time || evt.received_at * 1000 || now;
+    // evt.time is epoch seconds (USGS), received_at is epoch seconds
+    var eventTime = (evt.time || evt.received_at || now / 1000) * 1000;
+    if (eventTime < 1e12) eventTime *= 1000; // handle seconds vs ms
     var age = now - eventTime;
+    var ONE_HOUR = 3600 * 1000;
 
     // Marker size based on magnitude
     var radius = Math.max(4, Math.min(mag * 3, 20));
-    var color = mag >= 6 ? '#ff2222' : mag >= 5 ? '#ff8800' : mag >= 4 ? '#ffcc00' : '#22cc44';
 
-    // Ghost opacity: fresh events are solid, old ones fade
-    var GHOST_MAX_AGE = 24 * 3600 * 1000;
-    var ghostOpacity = Math.max(0.2, 1 - age / GHOST_MAX_AGE);
+    // Fresh event (< 1h): colored by magnitude. Old event (> 1h): grey ghost
+    var isFresh = age < ONE_HOUR;
+    var color = isFresh
+      ? (mag >= 6 ? '#ff2222' : mag >= 5 ? '#ff8800' : mag >= 4 ? '#ffcc00' : '#22cc44')
+      : '#666666';
 
-    var marker = L.circleMarker([evt.lat, evt.lon], {
-      radius: radius, color: color, fillColor: color,
-      fillOpacity: 0.4 * ghostOpacity, weight: 2, opacity: ghostOpacity,
-    }).addTo(map).bindPopup(
-      '<strong>M' + mag.toFixed(1) + '</strong><br>' + (evt.place || '') +
-      (evt.depth ? '<br>' + (window.I18N.depth || 'Depth') + ': ' + evt.depth.toFixed(0) + ' km' : '') +
-      (evt.dist_km ? '<br>' + (window.I18N.dist_caracas || 'Dist Caracas') + ': ' + Math.round(evt.dist_km) + ' km' : '')
-    );
-    eventMarkers.push(marker);
+    var timeStr = new Date(eventTime).toISOString().slice(11, 16) + ' UTC';
+    var dateStr = new Date(eventTime).toISOString().slice(5, 10).replace('-', '/');
 
-    // Ghost time label for events < 6h old and M >= 3.5
-    if (age < 6 * 3600000 && mag >= 3.5) {
-      var timeStr = new Date(eventTime).toISOString().slice(11, 16) + ' UTC';
-      var label = L.divIcon({
-        className: 'ghost-label',
-        html: '<span style="color:' + color + ';opacity:' + ghostOpacity +
-          ';font-size:10px;font-family:monospace;text-shadow:0 0 3px #000,0 0 6px #000;white-space:nowrap;">' +
-          'M' + mag.toFixed(1) + ' ' + timeStr + '</span>',
-        iconSize: [80, 14],
-        iconAnchor: [-radius - 2, 7],
-      });
-      var lbl = L.marker([evt.lat, evt.lon], { icon: label, interactive: false }).addTo(map);
-      eventMarkers.push(lbl);
-    }
+    if (isFresh) {
+      // --- FRESH EVENT: full color marker + popup ---
+      var marker = L.circleMarker([evt.lat, evt.lon], {
+        radius: radius, color: color, fillColor: color,
+        fillOpacity: 0.5, weight: 2, opacity: 0.9,
+      }).addTo(map).bindPopup(
+        '<strong>M' + mag.toFixed(1) + '</strong><br>' + (evt.place || '') +
+        '<br>' + timeStr +
+        (evt.depth ? '<br>' + (window.I18N.depth || 'Depth') + ': ' + evt.depth.toFixed(0) + ' km' : '') +
+        (evt.dist_km ? '<br>' + (window.I18N.dist_caracas || 'Dist Caracas') + ': ' + Math.round(evt.dist_km) + ' km' : '')
+      );
+      eventMarkers.push(marker);
 
-    // Isoseismal felt-radius circles for M >= 3.0
-    if (mag >= 3.0) {
-      var feltRadii = calculateFeltRadii(mag);
-      // During alarm: solid. After alarm: 30s fade
-      var alarmActive = (now - lastAlarmTime) < 300000; // 5 min
-      var fadeFraction = 0;
-      if (!alarmActive && age > 0) {
-        fadeFraction = Math.min(1, age / 60000); // 60s fade after alarm
-      }
-      if (fadeFraction < 1) {
-        var circleOpacity = Math.max(0, 0.5 * (1 - fadeFraction));
-        var fillOp = Math.max(0, 0.12 * (1 - fadeFraction));
-        feltRadii.forEach(function (fr) {
-          var fc = L.circle([evt.lat, evt.lon], {
-            radius: fr.radiusKm * 1000,
-            color: fr.color, fillColor: fr.color,
-            fillOpacity: fillOp,
-            weight: Math.max(0.5, 2 * (1 - fadeFraction)),
-            opacity: circleOpacity,
-            dashArray: fr.mmi <= 3 ? '4 4' : null,
-          }).addTo(map).bindPopup(
-            '<strong>M' + mag.toFixed(1) + '</strong> \u2014 ' + fr.label + '<br>' +
-            (window.I18N.radius || 'Radius') + ': ' + Math.round(fr.radiusKm) + ' km'
-          );
-          isoseismalLayers.push(fc);
-          eventMarkers.push(fc);
+      // Magnitude + time label next to marker
+      if (mag >= 3.5) {
+        var label = L.divIcon({
+          className: 'ghost-label',
+          html: '<span style="color:' + color +
+            ';font-size:10px;font-family:monospace;text-shadow:0 0 3px #000,0 0 6px #000;white-space:nowrap;">' +
+            'M' + mag.toFixed(1) + ' ' + timeStr + '</span>',
+          iconSize: [90, 14],
+          iconAnchor: [-radius - 2, 7],
         });
+        var lbl = L.marker([evt.lat, evt.lon], { icon: label, interactive: false }).addTo(map);
+        eventMarkers.push(lbl);
+      }
+    } else {
+      // --- OLD EVENT (> 1h): grey dot + date/time label ---
+      var ghostMarker = L.circleMarker([evt.lat, evt.lon], {
+        radius: Math.max(3, radius * 0.6), color: '#555', fillColor: '#444',
+        fillOpacity: 0.3, weight: 1, opacity: 0.5,
+      }).addTo(map).bindPopup(
+        '<strong>M' + mag.toFixed(1) + '</strong><br>' + (evt.place || '') +
+        '<br><span style="color:#888">' + dateStr + ' ' + timeStr + '</span>' +
+        (evt.depth ? '<br>' + (window.I18N.depth || 'Depth') + ': ' + evt.depth.toFixed(0) + ' km' : '')
+      );
+      eventMarkers.push(ghostMarker);
+
+      // Grey label with date+time
+      if (mag >= 3.5) {
+        var ghostLabel = L.divIcon({
+          className: 'ghost-label',
+          html: '<span style="color:#666;font-size:9px;font-family:monospace;text-shadow:0 0 3px #000;white-space:nowrap;">' +
+            'M' + mag.toFixed(1) + ' ' + dateStr + ' ' + timeStr + '</span>',
+          iconSize: [110, 14],
+          iconAnchor: [-4, 7],
+        });
+        var gLbl = L.marker([evt.lat, evt.lon], { icon: ghostLabel, interactive: false }).addTo(map);
+        eventMarkers.push(gLbl);
       }
     }
 
-    // Ghost ring animation for fresh events
-    if (isNew && mag >= 3.0) {
+    // Isoseismal circles + ghost rings ONLY for fresh new events
+    if (isNew && isFresh && mag >= 3.0) {
+      var feltRadii = calculateFeltRadii(mag);
+      feltRadii.forEach(function (fr) {
+        var fc = L.circle([evt.lat, evt.lon], {
+          radius: fr.radiusKm * 1000,
+          color: fr.color, fillColor: fr.color,
+          fillOpacity: 0.12,
+          weight: 2,
+          opacity: 0.5,
+          dashArray: fr.mmi <= 3 ? '4 4' : null,
+        }).addTo(map).bindPopup(
+          '<strong>M' + mag.toFixed(1) + '</strong> \u2014 ' + fr.label + '<br>' +
+          (window.I18N.radius || 'Radius') + ': ' + Math.round(fr.radiusKm) + ' km'
+        );
+        isoseismalLayers.push(fc);
+        eventMarkers.push(fc);
+
+        // Auto-fade after 60s
+        setTimeout(function () {
+          try { map.removeLayer(fc); } catch (e) {}
+        }, 60000);
+      });
+
       startGhostRing(evt.lat, evt.lon, color, mag);
     }
   }
