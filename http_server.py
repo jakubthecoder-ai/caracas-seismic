@@ -306,6 +306,7 @@ class HTTPServer:
         await asyncio.gather(
             self._alarm_monitor_loop(),
             self._status_broadcast_loop(),
+            self._waveform_broadcast_loop(),
         )
 
     async def _handle_index(self, request):
@@ -521,21 +522,29 @@ class HTTPServer:
                     dead.add(client)
             self.sse_clients -= dead
 
-            # Also broadcast waveforms if details panels are open
-            if self.detector:
-                sent = set()
-                for station_id, buf in self.detector.buffers.items():
-                    if not station_id.endswith('BHZ'):
-                        continue
-                    base = '.'.join(station_id.split('.')[:2])
-                    if base in sent:
-                        continue
-                    snippet = self.detector.get_waveform_snippet(station_id, seconds=60)
-                    if snippet and len(snippet.get('data', [])) > 10:
-                        wf_msg = {'type': 'waveform', **snippet}
-                        for client in self.sse_clients.copy():
-                            try:
-                                await self._sse_send(client, 'waveform', wf_msg)
-                            except Exception:
-                                pass
-                        sent.add(base)
+    async def _waveform_broadcast_loop(self):
+        """Broadcast waveform data every 2 seconds for near-real-time seismograms."""
+        while True:
+            await asyncio.sleep(2.0)
+
+            if not self.sse_clients or not self.detector:
+                continue
+
+            sent = set()
+            dead = set()
+            for station_id, buf in self.detector.buffers.items():
+                if not station_id.endswith('BHZ'):
+                    continue
+                base = '.'.join(station_id.split('.')[:2])
+                if base in sent:
+                    continue
+                snippet = self.detector.get_waveform_snippet(station_id, seconds=60)
+                if snippet and len(snippet.get('data', [])) > 10:
+                    wf_msg = {'type': 'waveform', **snippet}
+                    for client in self.sse_clients.copy():
+                        try:
+                            await self._sse_send(client, 'waveform', wf_msg)
+                        except Exception:
+                            dead.add(client)
+                    sent.add(base)
+            self.sse_clients -= dead
