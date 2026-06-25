@@ -1,0 +1,1681 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MONITOR DE TERREMOTOS CARACAS - EN VIVO</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg:#0a0c10; --card:#12151c; --border:#1e2230; --red:#ff2222; --orange:#ff8800; --yellow:#ffcc00; --green:#22cc44; --blue:#44aaff; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:#e0e0e0; overflow-x:hidden; }
+
+  .topbar {
+    display:flex; align-items:center; justify-content:space-between;
+    background:#0d0f14; border-bottom:2px solid var(--border); padding:8px 20px;
+  }
+  .topbar h1 { font-size:1.1em; }
+  .topbar .live { display:flex; align-items:center; gap:8px; }
+  .live-dot { width:10px;height:10px;border-radius:50%;background:var(--green);animation:blink 1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .topbar .meta { font-size:0.75em; color:#888; text-align:right; }
+
+  #threatBanner {
+    padding:12px 20px; text-align:center; font-weight:700; font-size:1.2em;
+    transition: background 0.3s;
+  }
+  .threat-green { background:#0a2a0a; color:var(--green); border-bottom:2px solid var(--green); }
+  .threat-yellow { background:#2a2a0a; color:var(--yellow); border-bottom:2px solid var(--yellow); }
+  .threat-orange { background:#2a1a0a; color:var(--orange); border-bottom:2px solid var(--orange); animation:pulseOrange 1.5s infinite; }
+  .threat-red { background:#2a0505; color:var(--red); border-bottom:2px solid var(--red); animation:pulseRed 0.8s infinite; }
+  @keyframes pulseOrange { 0%,100%{background:#2a1a0a} 50%{background:#3a2a0a} }
+  @keyframes pulseRed { 0%,100%{background:#2a0505} 50%{background:#4a0808} }
+  #tsunamiBanner {
+    display:none; padding:8px 20px; text-align:center; font-weight:700; font-size:1.1em;
+    background:#0a1a3a; color:#44aaff; border-bottom:2px solid #2266cc; animation:pulseTsunami 2s infinite;
+  }
+  #tsunamiBanner.active { display:block; }
+  @keyframes pulseTsunami { 0%,100%{background:#0a1a3a} 50%{background:#0a2a5a} }
+
+  .main { display:grid; grid-template-columns:1fr 360px; height:calc(100vh - 100px); position:relative; }
+  #map { width:100%; height:100%; }
+
+  /* Left event log panel (overlay on map) */
+  .event-panel {
+    position:absolute; left:0; top:0; bottom:0; width:340px; z-index:1000;
+    background:rgba(12,15,22,0.92); backdrop-filter:blur(6px);
+    border-right:1px solid var(--border);
+    display:flex; flex-direction:column;
+    transition: transform 0.3s ease;
+  }
+  .event-panel.collapsed { transform:translateX(-340px); }
+  .event-panel h2 {
+    font-size:0.85em; color:var(--blue); padding:10px 14px 6px;
+    border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+
+  .log-tabs {
+    display:flex; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .log-tab {
+    flex:1; padding:6px 8px; text-align:center; font-size:0.72em; font-weight:600;
+    cursor:pointer; border:none; background:transparent; color:#666;
+    border-bottom:2px solid transparent; transition:all 0.2s;
+  }
+  .log-tab:hover { color:#aaa; background:rgba(255,255,255,0.02); }
+  .log-tab.active { color:var(--blue); border-bottom-color:var(--blue); }
+  .log-tab .count { font-size:0.85em; color:#555; margin-left:3px; }
+  .log-tab.active .count { color:var(--blue); }
+
+  .log-pane { flex:1; overflow-y:auto; display:none; }
+  .log-pane.active { display:block; }
+
+  .event-panel-maximize {
+    position:absolute; right:4px; top:4px; width:22px; height:22px;
+    background:rgba(255,255,255,0.05); border:1px solid var(--border);
+    border-radius:3px; cursor:pointer; color:#666; font-size:0.7em;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .event-panel-maximize:hover { background:rgba(255,255,255,0.1); color:#aaa; }
+  .event-panel.maximized { width:100% !important; z-index:1100; }
+  .event-panel.maximized .event-panel-toggle { display:none; }
+
+  .felt-badge {
+    display:inline-block; font-size:0.6em; padding:1px 4px; border-radius:3px;
+    margin-left:4px; font-weight:600;
+  }
+  .felt-yes { background:#0a2a0a; color:#22cc44; }
+  .felt-no { background:#1a1a1a; color:#555; }
+
+  .event-panel-toggle {
+    position:absolute; right:-32px; top:50%; transform:translateY(-50%);
+    width:32px; height:80px; background:rgba(12,15,22,0.85); backdrop-filter:blur(6px);
+    border:1px solid var(--border); border-left:none;
+    border-radius:0 8px 8px 0; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--blue); font-size:1.2em; z-index:1001;
+    transition: background 0.2s;
+  }
+  .event-panel-toggle:hover { background:rgba(30,34,48,0.9); }
+  .event-panel-toggle .arrow { transition:transform 0.3s; }
+  .event-panel.collapsed .event-panel-toggle .arrow { transform:rotate(180deg); }
+
+  .ghost-label { background:none !important; border:none !important; }
+
+  .sidebar {
+    background:var(--card); border-left:1px solid var(--border);
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .sidebar h2 {
+    font-size:0.85em; color:var(--blue); padding:10px 14px 6px;
+    border-bottom:1px solid var(--border);
+  }
+  .stats {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:10px;
+  }
+  .stat {
+    background:rgba(255,255,255,0.03); border-radius:6px; padding:8px; text-align:center;
+  }
+  .stat .val { font-size:1.3em; font-weight:700; }
+  .stat .lbl { font-size:0.65em; color:#777; }
+  .stat.danger .val { color:var(--red); }
+  .stat.warn .val { color:var(--orange); }
+  .stat.ok .val { color:var(--green); }
+
+  .event-log {
+    flex:1; overflow-y:auto; padding:0;
+  }
+  .event-item {
+    padding:8px 14px; border-bottom:1px solid var(--border); font-size:0.8em;
+    transition: background 0.3s;
+  }
+  .event-item.new { background:rgba(255,136,0,0.1); }
+  .event-item.alert { background:rgba(255,34,34,0.15); }
+  .event-item .mag { font-weight:700; font-size:1.1em; }
+  .event-item .time { color:#888; font-size:0.85em; }
+  .event-item .impact { font-size:0.85em; margin-top:2px; }
+
+  .controls {
+    padding:10px; border-top:1px solid var(--border); display:flex; gap:8px;
+    flex-wrap: wrap;
+  }
+  .controls button {
+    flex:1; padding:8px; border:1px solid var(--border); border-radius:6px;
+    background:var(--bg); color:#ccc; cursor:pointer; font-size:0.8em;
+  }
+  .controls button:hover { background:#1a1d27; }
+  .controls button.active { border-color:var(--green); color:var(--green); }
+
+  .countdown {
+    text-align:center; padding:4px; font-size:0.7em; color:#555;
+    border-top:1px solid var(--border);
+  }
+
+  .seismogram-container {
+    border-top:1px solid var(--border); padding:8px 10px;
+    background:rgba(0,100,255,0.03); flex-shrink:0;
+  }
+  .seismogram-container h3 { font-size:0.75em; color:var(--blue); margin-bottom:4px; }
+  #seismogramCanvas { width:100%; height:200px; background:#080a0f; border-radius:4px; }
+
+  .backend-status {
+    display:flex; gap:6px; align-items:center; padding:2px 10px;
+    font-size:0.68em; color:#666; border-top:1px solid var(--border);
+  }
+  .backend-status .dot { width:6px;height:6px;border-radius:50%;display:inline-block; }
+  .source-tag {
+    display:inline-block; font-size:0.65em; padding:1px 4px; border-radius:3px;
+    margin-left:4px; font-weight:600;
+  }
+  .source-seedlink { background:#0a3a0a; color:#22ff66; }
+  .source-emsc { background:#3a3a0a; color:#ffcc00; }
+  .source-usgs { background:#0a1a3a; color:#44aaff; }
+  .source-multi { background:#2a0a3a; color:#cc88ff; }
+
+  /* ── MOBILE RESPONSIVE ── */
+  @media (max-width: 800px) {
+    .topbar { flex-direction:column; gap:4px; padding:6px 10px; }
+    .topbar h1 { font-size:0.95em; }
+    .topbar .meta { text-align:left; font-size:0.65em; }
+
+    .main { grid-template-columns:1fr; grid-template-rows:40vh 1fr; height:auto; min-height:100vh; }
+    #map { min-height:40vh; }
+
+    .sidebar { border-left:none; border-top:1px solid var(--border); }
+
+    .event-panel { width:280px; }
+    .event-panel.collapsed { transform:translateX(-280px); }
+
+    .stats { grid-template-columns:1fr 1fr 1fr 1fr; gap:4px; padding:6px; }
+    .stat .val { font-size:1.1em; }
+    .stat .lbl { font-size:0.58em; }
+
+    .caracas-panel { margin:4px 6px; padding:6px; }
+    .caracas-panel .row { font-size:0.72em; }
+
+    #seismogramCanvas { height:160px; }
+
+    .controls { padding:6px; gap:4px; }
+    .controls button { padding:6px 4px; font-size:0.72em; }
+
+    .backend-status { font-size:0.6em; flex-wrap:wrap; }
+
+    .event-item { padding:6px 10px; font-size:0.75em; }
+    .event-item .impact { font-size:0.78em; }
+
+    #threatBanner { font-size:1em; padding:8px 10px; }
+
+    .countdown { font-size:0.6em; }
+  }
+
+  @media (max-width: 480px) {
+    .topbar h1 { font-size:0.85em; }
+
+    .main { grid-template-rows:35vh 1fr; }
+
+    .event-panel { width:260px; }
+    .event-panel.collapsed { transform:translateX(-260px); }
+
+    .stats { grid-template-columns:1fr 1fr; }
+
+    .caracas-panel h3 { font-size:0.7em; }
+    .caracas-panel .row { font-size:0.68em; flex-direction:column; gap:1px; }
+
+    #seismogramCanvas { height:140px; }
+
+    .controls { flex-wrap:wrap; }
+    .controls button { min-width:45%; }
+
+    .event-item .impact { font-size:0.72em; word-break:break-word; }
+
+    #threatBanner { font-size:0.85em; }
+  }
+
+  .caracas-panel {
+    background:rgba(0,255,136,0.05); border:1px solid rgba(0,255,136,0.2);
+    border-radius:6px; margin:8px 10px; padding:10px;
+  }
+  .caracas-panel h3 { font-size:0.8em; color:#00ff88; margin-bottom:6px; }
+  .caracas-panel .row { display:flex; justify-content:space-between; font-size:0.78em; padding:2px 0; }
+  .caracas-panel .row .v { font-weight:600; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="live">
+    <div class="live-dot" id="liveDot"></div>
+    <h1>MONITOR SÍSMICO DE CARACAS</h1>
+  </div>
+  <div class="meta">
+    <div id="sourceStatus">Servidor: <span style="color:var(--yellow)">CONNECTING...</span> | USGS 2s | EMSC WS</div>
+    <div>Last USGS: <span id="lastUpdate">--</span> | Next: <span id="nextUpdate">--</span>s | <span class="live-dot" id="emscDot" style="display:inline-block;width:8px;height:8px;background:var(--yellow)"></span> EMSC | <span class="live-dot" style="display:inline-block;width:8px;height:8px;background:var(--yellow)" id="backendTopDot"></span> Backend
+    <a href="caracas_monitor.html" style="color:var(--blue);margin-left:8px;font-size:1.1em;text-decoration:none" title="English">EN</a></div>
+  </div>
+</div>
+
+<div id="threatBanner" class="threat-green">
+  ESTADO: MONITOREANDO | Sin amenaza inmediata detectada
+</div>
+<div id="tsunamiBanner"></div>
+
+<div class="main">
+  <div id="map"></div>
+
+  <!-- Left panel: Event Log (overlay on map, collapsible) -->
+  <div class="event-panel" id="eventPanel">
+    <div class="event-panel-toggle" onclick="toggleEventPanel()">
+      <span class="arrow">◀</span>
+    </div>
+    <span class="event-panel-maximize" onclick="toggleMaximize()" title="Maximize/Restore">&#9634;</span>
+    <div class="log-tabs">
+      <button class="log-tab active" id="tabEvents" onclick="switchLogTab('events')">EVENTS <span class="count" id="countEvents">(0)</span></button>
+      <button class="log-tab" id="tabWaveforms" onclick="switchLogTab('waveforms')">WAVEFORMS <span class="count" id="countWaveforms">(0)</span></button>
+    </div>
+    <div class="log-pane active event-log" id="logEvents"></div>
+    <div class="log-pane event-log" id="logWaveforms"></div>
+  </div>
+
+  <div class="sidebar">
+    <h2>IMPACTO EN CARACAS (BA08 + Basin x2)</h2>
+    <div class="caracas-panel">
+      <h3>Nivel de Amenaza Actual</h3>
+      <div class="row"><span>Último evento significativo:</span><span class="v" id="lastSigEvent">--</span></div>
+      <div class="row"><span>Hace:</span><span class="v" id="lastSigTime">--</span></div>
+      <div class="row"><span>PGA Est. Caracas (cuenca):</span><span class="v" id="lastSigPGA">--</span></div>
+      <div class="row"><span>MMI Est. Caracas:</span><span class="v" id="lastSigMMI">--</span></div>
+      <div class="row"><span>Llegada onda S:</span><span class="v" id="lastSigSwave">--</span></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat" id="statTotal"><div class="val">0</div><div class="lbl">Eventos (24h, región)</div></div>
+      <div class="stat" id="statM4"><div class="val">0</div><div class="lbl">M4.0+ (24h)</div></div>
+      <div class="stat" id="statM5"><div class="val">0</div><div class="lbl">M5.0+ (24h)</div></div>
+      <div class="stat" id="statMax"><div class="val">--</div><div class="lbl">Mag. máx. (24h)</div></div>
+    </div>
+
+    <div class="seismogram-container">
+      <h3>SISMOGRAMAS EN VIVO — Todas las Estaciones SeedLink (BHZ)</h3>
+      <canvas id="seismogramCanvas"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="btnSound" class="active" onclick="toggleSound()">Sonido ON</button>
+      <button id="btnNotif" onclick="requestNotifications()">Activar Notificaciones</button>
+      <button onclick="fetchNow()">Actualizar</button>
+      <button onclick="testAlarm()">Probar Alarma</button>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.75em;color:#888;cursor:pointer;flex-basis:100%;margin-top:4px;">
+        <input type="checkbox" id="chkElevated" checked onchange="toggleElevated()"> Mostrar alertas ELEVADAS en registro
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.75em;color:#888;cursor:pointer;flex-basis:100%;">
+        <input type="checkbox" id="chkFelt" checked onchange="toggleFeltCircles()"> Mostrar círculos de radio percibido
+      </label>
+    </div>
+
+    <div class="backend-status" id="backendStatus">
+      <span class="dot" id="backendDot" style="background:var(--red)"></span> Backend: <span id="backendLabel">DESCONECTADO</span>
+      <span style="margin-left:auto">
+        <span class="dot" id="slDot" style="background:var(--red)"></span> SeedLink
+        <span class="dot" id="emscBeDot" style="background:var(--red)" style="margin-left:4px"></span> EMSC
+        <span class="dot" id="usgsBeDot" style="background:var(--red)" style="margin-left:4px"></span> USGS
+      </span>
+    </div>
+
+    <div class="countdown">
+      Backend WS + USGS poll 15s + EMSC WebSocket | Region: lat 7-15, lon -75 to -59
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CARACAS = { lat: 10.4806, lon: -66.9036 };
+const REFRESH_INTERVAL = 2000; // 2 seconds
+const REGION = { minLat: 7, maxLat: 15, minLon: -75, maxLon: -59 }; // Wide Caribbean/Venezuela
+const ALERT_RADIUS_KM = 600; // Alert for events within this range of Caracas
+
+const FEEDS = {
+  hour:  'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson',
+  day25: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson',
+  day45: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson',
+};
+
+// BA08 coefficients (PGA, strike-slip)
+const BA08 = {
+  e2:-0.50350, e5:0.28805, e6:-0.10164, e7:0.0, Mh:6.75,
+  c1:-0.66050, c2:0.11970, c3:-0.01151, Mref:4.5, Rref:1.0, h:1.35,
+  blin:-0.360, b1:-0.640, b2:-0.14, Vref:760, V1:180, V2:300,
+  a1:0.03, a2:0.09, pga_low:0.06, sigma:0.5653,
+};
+const BASIN_AMP = 1.5; // Extra basin resonance beyond BA08 Vs30=270 response
+const BASIN_VS30 = 270;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+
+let soundEnabled = true;
+let notifEnabled = false;
+let knownEventIds = new Set();
+let allEvents = [];
+let map, caracasMarker, eventMarkers = [];
+let audioCtx = null;
+let refreshTimer = null;
+let countdownTimer = null;
+let countdown = 15;
+let emscWs = null;
+let emscConnected = false;
+let emscReconnectTimer = null;
+let feedSource = 'USGS+EMSC'; // dual source
+let backendWs = null;
+let backendConnected = false;
+let backendReconnectTimer = null;
+let waveformStations = {}; // {station_id: {data:[], sps:N, cft:N}}
+let seismogramAnimFrame = null;
+let showElevated = true;
+let sirenInterval = null;
+let lastAlarmTime = 0; // timestamp of last alarm trigger
+let alarmDurationMs = 0; // how long the current alarm lasts
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BA08 GMPE
+// ═══════════════════════════════════════════════════════════════════════════
+
+function ba08_pga_gal(mag, rjb, vs30) {
+  const B = BA08;
+  let FM = mag <= B.Mh
+    ? B.e2 + B.e5*(mag-B.Mh) + B.e6*Math.pow(mag-B.Mh,2)
+    : B.e2 + B.e7*(mag-B.Mh);
+
+  const R = Math.sqrt(rjb*rjb + B.h*B.h);
+  const FD = (B.c1 + B.c2*(mag-B.Mref))*Math.log(R/B.Rref) + B.c3*(R-B.Rref);
+
+  const lnPGA_rock = FM + FD;
+  const pga_rock_g = Math.exp(lnPGA_rock);
+
+  const FLIN = B.blin * Math.log(vs30/B.Vref);
+  let bnl;
+  if (vs30 <= B.V1) bnl = B.b1;
+  else if (vs30 <= B.V2) bnl = (B.b1-B.b2)*Math.log(vs30/B.V2)/Math.log(B.V1/B.V2) + B.b2;
+  else if (vs30 <= B.Vref) bnl = B.b2*Math.log(vs30/B.Vref)/Math.log(B.V2/B.Vref);
+  else bnl = 0;
+
+  let FNL;
+  if (pga_rock_g <= B.a1) FNL = bnl*Math.log(B.pga_low/0.1);
+  else if (pga_rock_g <= B.a2) FNL = bnl*Math.log(B.pga_low/0.1);
+  else FNL = bnl*Math.log(pga_rock_g/0.1);
+
+  const lnPGA = FM + FD + FLIN + FNL;
+  const pga_g = Math.exp(lnPGA);
+
+  return {
+    rock: pga_rock_g * 980.665,
+    soil: pga_g * BASIN_AMP * 980.665,
+    soil84: Math.exp(lnPGA + B.sigma) * BASIN_AMP * 980.665,
+  };
+}
+
+function pgaToMMI(gal) {
+  if (gal <= 0) return 1;
+  const lg = Math.log10(gal);
+  return Math.max(1, Math.min(12, Math.round((lg<=1.57 ? 1.78+1.55*lg : -1.60+3.70*lg)*10)/10));
+}
+
+function mmiDesc(m) {
+  return {1:"No percibido",2:"Débil",3:"Débil",4:"Ligero",5:"Moderado",6:"Fuerte",7:"Muy Fuerte",8:"Severo",9:"Violento",10:"Extremo"}[Math.min(Math.max(Math.round(m),1),10)]||"Extreme";
+}
+
+function haversine(lat1,lon1,lat2,lon2) {
+  const R=6371, dLat=rad(lat2-lat1), dLon=rad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function rad(d){return d*Math.PI/180;}
+
+// S-wave travel time estimate (avg Vs ~3.5 km/s through crust)
+function swaveSeconds(distKm, depthKm) {
+  const hypo = Math.sqrt(distKm*distKm + depthKm*depthKm);
+  return hypo / 3.5;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISOSEISMAL FELT RADIUS CIRCLES
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MMI_RINGS = [
+  {mmi: 8, color: '#cc0000', label: 'VIII Severe'},
+  {mmi: 7, color: '#ee4400', label: 'VII Very Strong'},
+  {mmi: 6, color: '#ff8800', label: 'VI Strong'},
+  {mmi: 5, color: '#ffcc00', label: 'V Moderate'},
+  {mmi: 4, color: '#eeee44', label: 'IV Light'},
+  {mmi: 3, color: '#88ccff', label: 'III Weak'},
+  {mmi: 2, color: '#cceeFF', label: 'II Barely felt'},
+];
+
+let showFeltCircles = true;
+
+function ba08_pga_generic(mag, rjb) {
+  // BA08 PGA for Vs30=400 (stiff soil average), no basin amplification
+  return ba08_pga_gal(mag, rjb, 400).soil / BASIN_AMP;
+}
+
+function calculateFeltRadii(mag) {
+  if (mag < 2.5) return [];
+  const radii = [];
+  for (const level of MMI_RINGS) {
+    const pga0 = ba08_pga_generic(mag, 0.1);
+    if (pgaToMMI(pga0) < level.mmi) continue;
+    // Binary search: find max distance where MMI >= level.mmi
+    let lo = 0, hi = 2000;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      const pga = ba08_pga_generic(mag, mid);
+      if (pgaToMMI(pga) >= level.mmi) lo = mid; else hi = mid;
+    }
+    if (lo >= 1) radii.push({radiusKm: lo, mmi: level.mmi, color: level.color, label: level.label});
+  }
+  return radii;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIO ALERTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playBeep(freq, duration, repeat, urgency) {
+  if (!soundEnabled) return;
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+
+  for (let i = 0; i < repeat; i++) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    osc.type = urgency === 'critical' ? 'square' : 'sine';
+    gain.gain.setValueAtTime(0.3, now + i*(duration+0.1));
+    gain.gain.exponentialRampToValueAtTime(0.001, now + i*(duration+0.1) + duration);
+    osc.start(now + i*(duration+0.1));
+    osc.stop(now + i*(duration+0.1) + duration);
+  }
+}
+
+function playSiren(durationSec) {
+  if (!soundEnabled) return;
+  stopSiren();
+  const ctx = getAudioCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = 'sawtooth';
+  gain.gain.value = 0.35;
+
+  // Sweep 400-900 Hz in a siren pattern
+  const startTime = ctx.currentTime;
+  const cycles = Math.ceil(durationSec * 2);
+  for (let i = 0; i < cycles; i++) {
+    const t = startTime + i * 0.5;
+    osc.frequency.setValueAtTime(400, t);
+    osc.frequency.linearRampToValueAtTime(900, t + 0.25);
+    osc.frequency.linearRampToValueAtTime(400, t + 0.5);
+  }
+  osc.start(startTime);
+  osc.stop(startTime + durationSec);
+  gain.gain.setValueAtTime(0.35, startTime + durationSec - 0.3);
+  gain.gain.linearRampToValueAtTime(0, startTime + durationSec);
+
+  // Flash screen border red during siren
+  document.body.style.outline = '4px solid #ff0000';
+  sirenInterval = setTimeout(() => {
+    document.body.style.outline = 'none';
+    sirenInterval = null;
+  }, durationSec * 1000);
+}
+
+function stopSiren() {
+  if (sirenInterval) {
+    clearTimeout(sirenInterval);
+    sirenInterval = null;
+    document.body.style.outline = 'none';
+  }
+}
+
+function alarmLevel(mag, distKm) {
+  if (mag >= 6.0 && distKm < 400) return 'critical';
+  if (mag >= 5.0 && distKm < 300) return 'high';
+  if (mag >= 4.5 && distKm < 300) return 'medium';
+  if (mag >= 4.0 && distKm < 500) return 'low';
+  if (mag >= 3.0 && distKm < 200) return 'info';
+  return 'none';
+}
+
+function triggerAlarm(level, mag, place) {
+  lastAlarmTime = Date.now();
+  switch(level) {
+    case 'critical':
+      alarmDurationMs = 30000;
+      playSiren(8);
+      playBeep(880, 0.3, 10, 'critical');
+      document.getElementById('threatBanner').className = 'threat-red';
+      document.getElementById('threatBanner').innerHTML = `ALERT: M${mag.toFixed(1)} - ${place} - POSIBLE SACUDIDA FUERTE EN CARACAS`;
+      break;
+    case 'high':
+      alarmDurationMs = 20000;
+      playSiren(5);
+      playBeep(660, 0.3, 6, 'high');
+      document.getElementById('threatBanner').className = 'threat-orange';
+      document.getElementById('threatBanner').innerHTML = `WARNING: M${mag.toFixed(1)} - ${place} - Sacudida moderada posible en Caracas`;
+      break;
+    case 'medium':
+      alarmDurationMs = 15000;
+      playBeep(440, 0.4, 3, 'medium');
+      document.getElementById('threatBanner').className = 'threat-yellow';
+      document.getElementById('threatBanner').innerHTML = `NOTICE: M${mag.toFixed(1)} - ${place} - Sacudida ligera posible en Caracas`;
+      break;
+    case 'low':
+      alarmDurationMs = 5000;
+      playBeep(330, 0.5, 1, 'low');
+      break;
+  }
+
+  if (notifEnabled && level !== 'none' && level !== 'info') {
+    new Notification(`Sismo M${mag.toFixed(1)} cerca de Caracas`, {
+      body: `${place}\nAlarm: ${level.toUpperCase()}`,
+      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔴</text></svg>',
+      requireInteraction: level === 'critical',
+    });
+  }
+}
+
+function testAlarm() {
+  playSiren(3);
+  playBeep(880, 0.3, 3, 'critical');
+  document.getElementById('threatBanner').className = 'threat-red';
+  document.getElementById('threatBanner').innerHTML = 'ALARMA DE PRUEBA - Esto es una prueba';
+  setTimeout(() => {
+    document.getElementById('threatBanner').className = 'threat-green';
+    document.getElementById('threatBanner').innerHTML = 'ESTADO: MONITOREANDO | Prueba completada';
+  }, 5000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMSC WEBSOCKET (SeismicPortal) — REAL-TIME PUSH, ~30s latency for M5+
+// ═══════════════════════════════════════════════════════════════════════════
+
+function connectEMSC() {
+  if (emscWs && emscWs.readyState <= 1) return; // already open/connecting
+
+  try {
+    emscWs = new WebSocket('wss://www.seismicportal.eu/standing_order/websocket');
+
+    emscWs.onopen = () => {
+      emscConnected = true;
+      updateSourceStatus();
+      console.log('[EMSC] WebSocket connected');
+    };
+
+    emscWs.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.action === 'create' || data.action === 'update') {
+          const info = data.data?.properties;
+          if (!info) return;
+
+          const lat = info.lat;
+          const lon = info.lon;
+          const mag = info.mag;
+          const depth = info.depth || 10;
+          const place = info.flynn_region || info.source_catalog || 'Unknown';
+          const time = new Date(info.time).getTime();
+          const id = 'emsc_' + data.data.id;
+
+          // Check if in our region
+          if (lat < REGION.minLat || lat > REGION.maxLat || lon < REGION.minLon || lon > REGION.maxLon) return;
+
+          const distKm = haversine(CARACAS.lat, CARACAS.lon, lat, lon);
+          if (distKm > 800) return; // skip if too far
+
+          const pga = ba08_pga_gal(mag, distKm, BASIN_VS30);
+          const mmi = pgaToMMI(pga.soil);
+          const level = alarmLevel(mag, distKm);
+
+          const event = {
+            id, mag, lat, lon, depth, place, time,
+            distKm: Math.round(distKm), pga_basin: pga.soil, mmi,
+            mmiDesc: mmiDesc(mmi), swave: Math.round(swaveSeconds(distKm, depth)),
+            level, isNew: !knownEventIds.has(id), source: 'EMSC-WS',
+          };
+
+          if (!knownEventIds.has(id)) {
+            knownEventIds.add(id);
+            allEvents.unshift(event);
+            allEvents.sort((a,b) => b.time - a.time);
+
+            // Flash the EMSC indicator
+            const dot = document.getElementById('emscDot');
+            if (dot) { dot.style.background = '#ffcc00'; setTimeout(() => dot.style.background = emscConnected ? 'var(--green)' : 'var(--red)', 1500); }
+
+            console.log(`[EMSC-WS] New event: M${mag.toFixed(1)} ${place} (${distKm} km)`);
+
+            // Only alarm for fresh events (< 5 min old)
+            const emscAge = Date.now() - time;
+            if (level !== 'none' && emscAge < 300000) {
+              triggerAlarm(level, mag, `[EMSC LIVE] ${place}`);
+            }
+
+            updateUI();
+            updateMap();
+          }
+        }
+      } catch(e) { console.warn('[EMSC] Parse error:', e); }
+    };
+
+    emscWs.onclose = () => {
+      emscConnected = false;
+      updateSourceStatus();
+      console.log('[EMSC] WebSocket closed, reconnecting in 5s...');
+      emscReconnectTimer = setTimeout(connectEMSC, 5000);
+    };
+
+    emscWs.onerror = (err) => {
+      console.warn('[EMSC] WebSocket error:', err);
+      emscConnected = false;
+      updateSourceStatus();
+    };
+  } catch(e) {
+    console.warn('[EMSC] Failed to connect:', e);
+    emscConnected = false;
+    setTimeout(connectEMSC, 10000);
+  }
+}
+
+function updateSourceStatus() {
+  const el = document.getElementById('sourceStatus');
+  if (el) {
+    const beColor = backendConnected ? 'var(--green)' : 'var(--red)';
+    const beText = backendConnected ? 'CONNECTED' : 'OFFLINE';
+    const emColor = emscConnected ? 'var(--green)' : 'var(--red)';
+    const emText = emscConnected ? 'OK' : 'DOWN';
+    el.innerHTML = `Backend: <span style="color:${beColor}">${beText}</span> | USGS 15s | EMSC: <span style="color:${emColor}">${emText}</span>`;
+  }
+  const dot = document.getElementById('emscDot');
+  if (dot) dot.style.background = emscConnected ? 'var(--green)' : 'var(--red)';
+  const beDot = document.getElementById('backendTopDot');
+  if (beDot) beDot.style.background = backendConnected ? 'var(--green)' : 'var(--red)';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// USGS POLLING (fallback + historical context, every 15s)
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function fetchData() {
+  const dot = document.getElementById('liveDot');
+  dot.style.background = '#ffcc00';
+
+  try {
+    // Fetch multiple feeds in parallel
+    const [hourRes, dayRes] = await Promise.all([
+      fetch(FEEDS.hour).then(r => r.json()).catch(() => ({features:[]})),
+      fetch(FEEDS.day25).then(r => r.json()).catch(() => ({features:[]})),
+    ]);
+
+    // Merge and deduplicate
+    const allFeatures = [...(hourRes.features||[]), ...(dayRes.features||[])];
+    const seen = new Set();
+    const unique = [];
+    for (const f of allFeatures) {
+      if (!seen.has(f.id)) {
+        seen.add(f.id);
+        unique.push(f);
+      }
+    }
+
+    // Filter to region
+    const regional = unique.filter(f => {
+      const [lon, lat] = f.geometry.coordinates;
+      return lat >= REGION.minLat && lat <= REGION.maxLat
+          && lon >= REGION.minLon && lon <= REGION.maxLon;
+    });
+
+    // Process events
+    const newEvents = [];
+    for (const f of regional) {
+      const [lon, lat, depth] = f.geometry.coordinates;
+      const mag = f.properties.mag;
+      const place = f.properties.place || 'Unknown';
+      const time = f.properties.time;
+      const distKm = haversine(CARACAS.lat, CARACAS.lon, lat, lon);
+      const pga = ba08_pga_gal(mag, distKm, BASIN_VS30);
+      const mmi = pgaToMMI(pga.soil);
+      const swave = swaveSeconds(distKm, Math.abs(depth));
+
+      const evt = {
+        id: f.id, mag, lat, lon, depth: Math.abs(depth), place, time,
+        distKm: Math.round(distKm), pga_rock: pga.rock, pga_basin: pga.soil,
+        pga_84: pga.soil84, mmi, mmiDesc: mmiDesc(mmi), swave: Math.round(swave),
+        level: alarmLevel(mag, distKm),
+        isNew: !knownEventIds.has(f.id),
+      };
+
+      if (evt.isNew) {
+        newEvents.push(evt);
+        knownEventIds.add(f.id);
+      }
+    }
+
+    // Merge new USGS events into allEvents (don't overwrite backend/waveform events!)
+    for (const f of regional) {
+      const existing = allEvents.find(x => x.id === f.id);
+      if (existing) {
+        // Update existing USGS event data (mag may have been revised)
+        existing.mag = f.properties.mag;
+        existing.place = f.properties.place || existing.place;
+        continue;
+      }
+      if (knownEventIds.has(f.id)) continue; // already processed as new above
+
+      const [lon,lat,depth] = f.geometry.coordinates;
+      const mag = f.properties.mag;
+      const distKm = haversine(CARACAS.lat, CARACAS.lon, lat, lon);
+      const pga = ba08_pga_gal(mag, distKm, BASIN_VS30);
+      const mmi = pgaToMMI(pga.soil);
+      allEvents.push({
+        id:f.id, mag, lat, lon, depth:Math.abs(depth),
+        place:f.properties.place||'?', time:f.properties.time,
+        distKm:Math.round(distKm), pga_basin:pga.soil, mmi,
+        mmiDesc:mmiDesc(mmi), swave:Math.round(swaveSeconds(distKm,Math.abs(depth))),
+        level:alarmLevel(mag,distKm), isNew:false,
+      });
+      knownEventIds.add(f.id);
+    }
+
+    // Mark genuinely new events
+    for (const evt of newEvents) {
+      const found = allEvents.find(x => x.id === evt.id);
+      if (found) found.isNew = true;
+    }
+
+    allEvents.sort((a,b) => b.time - a.time);
+
+    // Prune old events (keep 48h on map/log, DB keeps 7 days)
+    const cutoff48h = Date.now() - 48 * 3600 * 1000;
+    allEvents = allEvents.filter(e => e.time > cutoff48h).slice(0, 1000);
+
+    // Trigger alarms for truly fresh events only (< 5 min old)
+    for (const evt of newEvents.sort((a,b) => b.mag - a.mag)) {
+      const evtAge = Date.now() - evt.time;
+      if (evt.level !== 'none' && evtAge < 300000) {
+        triggerAlarm(evt.level, evt.mag, evt.place);
+        break; // Only alarm for the most significant new event
+      }
+    }
+
+    updateUI();
+    updateMap();
+
+    dot.style.background = 'var(--green)';
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+
+  } catch(err) {
+    console.error('Fetch error:', err);
+    dot.style.background = 'var(--red)';
+  }
+
+  countdown = REFRESH_INTERVAL / 1000;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UI UPDATE
+// ═══════════════════════════════════════════════════════════════════════════
+
+function updateUI() {
+  // Stats
+  const total = allEvents.length;
+  const m4 = allEvents.filter(e => e.mag >= 4.0).length;
+  const m5 = allEvents.filter(e => e.mag >= 5.0).length;
+  const maxMag = allEvents.length ? Math.max(...allEvents.map(e => e.mag)) : 0;
+
+  setStatVal('statTotal', total);
+  setStatVal('statM4', m4, m4 > 0 ? 'warn' : 'ok');
+  setStatVal('statM5', m5, m5 > 0 ? 'danger' : 'ok');
+  setStatVal('statMax', maxMag > 0 ? `M${maxMag.toFixed(1)}` : '--', maxMag >= 5 ? 'danger' : maxMag >= 4 ? 'warn' : 'ok');
+
+  // Find most significant recent event
+  const significant = allEvents.filter(e => e.mag >= 3.5 && e.distKm < 500);
+  if (significant.length > 0) {
+    const s = significant[0]; // newest significant
+    const ago = timeSince(s.time);
+    document.getElementById('lastSigEvent').textContent = `M${s.mag.toFixed(1)} ${s.place}`;
+    document.getElementById('lastSigTime').textContent = ago;
+    document.getElementById('lastSigPGA').textContent = `${s.pga_basin.toFixed(1)} gal`;
+    document.getElementById('lastSigMMI').textContent = `${s.mmi.toFixed(1)} (${s.mmiDesc})`;
+    document.getElementById('lastSigSwave').textContent = `~${s.swave}s from origin`;
+
+    document.getElementById('lastSigPGA').style.color =
+      s.pga_basin > 50 ? 'var(--red)' : s.pga_basin > 20 ? 'var(--orange)' : s.pga_basin > 5 ? 'var(--yellow)' : 'var(--green)';
+  }
+
+  // Split events into two logs: catalog events vs waveform alerts
+  const catalogEvents = allEvents.filter(e => !e.isWaveformAlert);
+  const waveformEvents = allEvents.filter(e => e.isWaveformAlert);
+
+  // Update tab counts
+  const ce = document.getElementById('countEvents');
+  const cw = document.getElementById('countWaveforms');
+  if (ce) ce.textContent = `(${catalogEvents.length})`;
+  if (cw) cw.textContent = `(${waveformEvents.length})`;
+
+  // Render catalog events (USGS + EMSC + SeedLink detections)
+  const logE = document.getElementById('logEvents');
+  logE.innerHTML = '';
+  catalogEvents.forEach(e => {
+    logE.appendChild(buildEventItem(e));
+  });
+
+  // Render waveform alerts (STA/LTA triggers)
+  const logW = document.getElementById('logWaveforms');
+  logW.innerHTML = '';
+  waveformEvents.forEach(e => {
+    logW.appendChild(buildWaveformItem(e));
+  });
+
+  // Update threat banner if no recent alerts (decay to green after 10 min)
+  const recentAlert = allEvents.find(e => e.level !== 'none' && e.level !== 'info' && (Date.now() - e.time) < 600000);
+  if (!recentAlert) {
+    const banner = document.getElementById('threatBanner');
+    if (!banner.className.includes('threat-green')) {
+      banner.className = 'threat-green';
+      banner.innerHTML = 'ESTADO: MONITOREANDO | Sin amenaza inmediata detectada';
+    }
+  }
+}
+
+function setStatVal(id, val, cls) {
+  const el = document.getElementById(id);
+  el.querySelector('.val').textContent = val;
+  el.className = `stat ${cls || ''}`;
+}
+
+function timeSince(epochMs) {
+  const s = Math.floor((Date.now() - epochMs) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 86400) return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ago`;
+  return `${Math.floor(s/86400)}d ago`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAP
+// ═══════════════════════════════════════════════════════════════════════════
+
+function initMap() {
+  map = L.map('map').setView([CARACAS.lat, CARACAS.lon], 7);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OSM, CARTO', maxZoom: 18
+  }).addTo(map);
+
+  // Caracas marker (permanent)
+  caracasMarker = L.circleMarker([CARACAS.lat, CARACAS.lon], {
+    radius: 8, color: '#00ff88', fillColor: '#00ff88', fillOpacity: 0.9, weight: 2
+  }).addTo(map).bindPopup('<strong>CARACAS</strong><br>Su objetivo de monitoreo');
+
+  // Alert radius circles
+  L.circle([CARACAS.lat, CARACAS.lon], {
+    radius: 200000, color: '#ff2222', fillOpacity: 0, weight: 1, dashArray: '6,4', opacity: 0.3
+  }).addTo(map).bindPopup('200 km - Zona de sacudida severa');
+
+  L.circle([CARACAS.lat, CARACAS.lon], {
+    radius: 400000, color: '#ff8800', fillOpacity: 0, weight: 1, dashArray: '6,4', opacity: 0.2
+  }).addTo(map).bindPopup('400 km - Zona de sacudida moderada');
+
+  // Falla de San Sebastián
+  L.polyline([
+    [10.5,-69.5],[10.48,-68.5],[10.5,-67.5],[10.5,-66.9],[10.5,-66],[10.5,-65]
+  ], { color: '#ff6600', weight: 2, opacity: 0.6 }).addTo(map).bindPopup('Falla de San Sebastián');
+
+  // SeedLink station markers (triangles via divIcon)
+  const stations = [
+    { id:'IU.SDV', lat:8.887, lon:-70.634, name:'Santo Domingo, VE', color:'#22cc44' },
+    { id:'IU.SJG', lat:18.109, lon:-66.150, name:'San Juan, PR', color:'#cc88ff' },
+    { id:'CU.GRTK', lat:21.515, lon:-71.133, name:'Grand Turk', color:'#44aaff' },
+    { id:'CU.BCIP', lat:9.171, lon:-79.837, name:'Barro Colorado, PA', color:'#8888ff' },
+    { id:'CM.BAR2', lat:10.880, lon:-74.833, name:'Barranquilla, CO', color:'#ff88cc' },
+  ];
+  stations.forEach(s => {
+    const icon = L.divIcon({
+      className:'',
+      html:`<svg width="14" height="14" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="${s.color}" opacity="0.7" stroke="${s.color}" stroke-width="1"/></svg>`,
+      iconSize:[14,14], iconAnchor:[7,13],
+    });
+    L.marker([s.lat, s.lon], { icon }).addTo(map)
+      .bindPopup(`<strong>${s.id}</strong><br>${s.name}<br>SeedLink station`);
+  });
+}
+
+// Ghost ring animation state
+let ghostRings = [];
+let ghostAnimFrame = null;
+
+function updateMap() {
+  // Remove old markers (keep ghost rings separate)
+  eventMarkers.forEach(m => map.removeLayer(m));
+  eventMarkers = [];
+
+  const now = Date.now();
+  const GHOST_MAX_AGE = 24 * 3600 * 1000; // 24h full ghost decay
+
+  allEvents.forEach(e => {
+    const age = now - e.time;
+    const ageFraction = Math.min(1, age / GHOST_MAX_AGE); // 0=fresh, 1=24h old
+
+    // Ghost opacity: fresh=0.9, old=0.08
+    const ghostOpacity = Math.max(0.08, 0.9 - ageFraction * 0.82);
+    const fillGhostOpacity = Math.max(0.05, 0.7 - ageFraction * 0.65);
+    const strokeWeight = age < 300000 ? 3 : age < 3600000 ? 2 : 1; // 5min=bold, 1h=normal, old=thin
+
+    let color = '#44aaff', r = 4;
+    if (e.mag >= 6) { color = '#ff0000'; r = 12; }
+    else if (e.mag >= 5) { color = '#ff8800'; r = 8; }
+    else if (e.mag >= 4) { color = '#ffcc00'; r = 6; }
+    else if (e.mag >= 3) { color = '#44aaff'; r = 4; }
+
+    // Scale radius slightly by ghosting — fresh events appear bigger
+    const ghostR = r * (1 + (1 - ageFraction) * 0.5);
+
+    const marker = L.circleMarker([e.lat, e.lon], {
+      radius: ghostR, color, fillColor: color,
+      fillOpacity: fillGhostOpacity,
+      opacity: ghostOpacity,
+      weight: strokeWeight,
+    }).addTo(map).bindPopup(
+      `<strong>M${e.mag.toFixed(1)}</strong><br>${e.place}<br>` +
+      `<span style="color:#888">${new Date(e.time).toISOString().replace('T',' ').slice(0,19)} UTC</span><br>` +
+      `${timeSince(e.time)}<br>` +
+      `Profundidad: ${e.depth} km | Dist. Caracas: ${e.distKm} km<br>` +
+      `PGA cuenca: ${e.pga_basin.toFixed(1)} gal | MMI: ${e.mmi.toFixed(0)} (${e.mmiDesc})`
+    );
+    eventMarkers.push(marker);
+
+    // Ghost time label on map for events < 6h old and M >= 3.5
+    if (age < 6 * 3600000 && e.mag >= 3.5) {
+      const timeStr = new Date(e.time).toISOString().slice(11,16) + ' UTC';
+      const label = L.divIcon({
+        className: 'ghost-label',
+        html: `<span style="color:${color};opacity:${ghostOpacity};font-size:10px;font-family:monospace;text-shadow:0 0 3px #000,0 0 6px #000;white-space:nowrap;">M${e.mag.toFixed(1)} ${timeStr}</span>`,
+        iconSize: [80, 14],
+        iconAnchor: [-ghostR-2, 7],
+      });
+      const lbl = L.marker([e.lat, e.lon], { icon: label, interactive: false }).addTo(map);
+      eventMarkers.push(lbl);
+    }
+
+    // Isoseismal felt radius circles — hold solid during alarm, then 30s fade-out
+    if (showFeltCircles && e.mag >= 3.0 && e.source !== 'seedlink') {
+      const alarmActive = (now - lastAlarmTime) < alarmDurationMs;
+      const FADE_DURATION = 30000;
+      const alarmEndTime = lastAlarmTime + alarmDurationMs;
+      const timeSinceAlarmEnd = alarmActive ? 0 : (now - alarmEndTime);
+      const maxShowTime = alarmDurationMs + FADE_DURATION;
+      const shouldShow = alarmActive || age <= maxShowTime;
+
+      if (shouldShow) {
+        let fadeFraction = 0;
+        if (!alarmActive && timeSinceAlarmEnd > 0) {
+          fadeFraction = Math.min(1, timeSinceAlarmEnd / FADE_DURATION);
+        }
+        // Fade based on event age if no alarm was triggered for this event
+        if (lastAlarmTime < e.time - 5000) {
+          fadeFraction = Math.min(1, age / FADE_DURATION);
+        }
+
+        if (fadeFraction < 1) {
+          const feltRadii = calculateFeltRadii(e.mag);
+          const circleOpacity = Math.max(0, 0.5 * (1 - fadeFraction));
+          const fillOp = Math.max(0, 0.15 * (1 - fadeFraction));
+          feltRadii.forEach(fr => {
+            const fc = L.circle([e.lat, e.lon], {
+              radius: fr.radiusKm * 1000,
+              color: fr.color,
+              fillColor: fr.color,
+              fillOpacity: fillOp,
+              weight: Math.max(0.5, 2 * (1 - fadeFraction)),
+              opacity: circleOpacity,
+              dashArray: fr.mmi <= 3 ? '4 4' : null,
+            }).addTo(map).bindPopup(
+              `<strong>M${e.mag.toFixed(1)}</strong> — ${fr.label}<br>` +
+              `Radius: ${Math.round(fr.radiusKm)} km<br>` +
+              `<span style="color:#888">${e.place}</span>`
+            );
+            eventMarkers.push(fc);
+          });
+        }
+      }
+    }
+
+    // Expanding ghost rings for fresh events (< 10 min) — seismic wave propagation effect
+    if (e.isNew && age < 600000 && e.mag >= 3.0) {
+      startGhostRing(e.lat, e.lon, color, e.mag);
+    }
+  });
+}
+
+function startGhostRing(lat, lon, color, mag) {
+  const ring = {
+    lat, lon, color, mag,
+    startTime: Date.now(),
+    duration: 30000, // 30 seconds animation
+    maxRadius: mag * 30000, // km in meters
+    layers: [],
+  };
+
+  // Create 3 concentric expanding rings
+  for (let i = 0; i < 3; i++) {
+    const delay = i * 3000;
+    setTimeout(() => {
+      if (!map) return;
+      const circle = L.circle([lat, lon], {
+        radius: 1000,
+        color: color,
+        fillOpacity: 0,
+        weight: 2,
+        opacity: 0.6,
+      }).addTo(map);
+      ring.layers.push({ circle, startTime: Date.now() });
+    }, delay);
+  }
+
+  ghostRings.push(ring);
+  if (!ghostAnimFrame) animateGhostRings();
+}
+
+function animateGhostRings() {
+  const now = Date.now();
+
+  ghostRings = ghostRings.filter(ring => {
+    const age = now - ring.startTime;
+    if (age > ring.duration + 10000) {
+      // Cleanup
+      ring.layers.forEach(l => { try { map.removeLayer(l.circle); } catch(e){} });
+      return false;
+    }
+
+    ring.layers.forEach(l => {
+      const layerAge = now - l.startTime;
+      const progress = Math.min(1, layerAge / ring.duration);
+      const radius = progress * ring.maxRadius;
+      const opacity = Math.max(0, 0.6 * (1 - progress));
+
+      try {
+        l.circle.setRadius(radius);
+        l.circle.setStyle({ opacity, weight: Math.max(0.5, 2 * (1 - progress)) });
+      } catch(e) {}
+    });
+
+    return true;
+  });
+
+  if (ghostRings.length > 0) {
+    ghostAnimFrame = requestAnimationFrame(animateGhostRings);
+  } else {
+    ghostAnimFrame = null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTROLS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  const btn = document.getElementById('btnSound');
+  btn.textContent = soundEnabled ? 'Sonido ON' : 'Sonido OFF';
+  btn.className = soundEnabled ? 'active' : '';
+}
+
+function requestNotifications() {
+  if ('Notification' in window) {
+    Notification.requestPermission().then(p => {
+      notifEnabled = p === 'granted';
+      document.getElementById('btnNotif').textContent = notifEnabled ? 'Notif ON' : 'Notif OFF';
+      document.getElementById('btnNotif').className = notifEnabled ? 'active' : '';
+    });
+  }
+}
+
+function fetchNow() {
+  countdown = 0;
+  fetchData();
+}
+
+function toggleEventPanel() {
+  const panel = document.getElementById('eventPanel');
+  panel.classList.toggle('collapsed');
+  // Invalidate map size after transition
+  setTimeout(() => { if (map) map.invalidateSize(); }, 350);
+}
+
+function toggleElevated() {
+  showElevated = document.getElementById('chkElevated').checked;
+  updateUI();
+}
+
+function toggleFeltCircles() {
+  showFeltCircles = document.getElementById('chkFelt').checked;
+  updateMap();
+}
+
+function switchLogTab(tab) {
+  document.getElementById('tabEvents').className = 'log-tab' + (tab === 'events' ? ' active' : '');
+  document.getElementById('tabWaveforms').className = 'log-tab' + (tab === 'waveforms' ? ' active' : '');
+  document.getElementById('logEvents').className = 'log-pane event-log' + (tab === 'events' ? ' active' : '');
+  document.getElementById('logWaveforms').className = 'log-pane event-log' + (tab === 'waveforms' ? ' active' : '');
+}
+
+function toggleMaximize() {
+  const panel = document.getElementById('eventPanel');
+  panel.classList.toggle('maximized');
+  setTimeout(() => { if (map) map.invalidateSize(); }, 350);
+}
+
+function buildEventItem(e) {
+  const div = document.createElement('div');
+  div.className = `event-item ${e.isNew ? 'new' : ''} ${e.level === 'critical' || e.level === 'high' ? 'alert' : ''}`;
+
+  const magColor = e.mag >= 6 ? 'var(--red)' : e.mag >= 5 ? 'var(--orange)' : e.mag >= 4 ? 'var(--yellow)' : 'var(--blue)';
+  const ago = timeSince(e.time);
+
+  const src = e.source || e.sources || '';
+  const srcClass = src.includes('seedlink') ? 'source-seedlink' :
+                   src.includes('+') ? 'source-multi' :
+                   src.includes('emsc') || src.includes('EMSC') ? 'source-emsc' : 'source-usgs';
+  const srcLabel = src.includes('seedlink') ? 'SeedLink' :
+                   src.includes('+') ? src : src || 'USGS';
+  const feltStr = e.feltReports ? ` | Felt: ${e.feltReports} reports` : '';
+  const utcTime = new Date(e.time).toISOString().replace('T',' ').slice(0,19) + ' UTC';
+
+  // Felt indicator based on MMI
+  const isFelt = (e.mmi || 0) >= 2.0;
+  const feltBadge = isFelt
+    ? '<span class="felt-badge felt-yes">FELT</span>'
+    : '<span class="felt-badge felt-no">not felt</span>';
+
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span class="mag" style="color:${magColor}">M${e.mag.toFixed(1)}</span>
+      <span>${feltBadge}<span class="source-tag ${srcClass}">${srcLabel}</span> <span class="time">${ago}</span></span>
+    </div>
+    <div>${e.place}</div>
+    <div class="impact"><span style="color:#666">${utcTime}</span> | ${e.distKm||0} km | PGA: ${(e.pga_basin||0).toFixed(1)} gal | MMI: ${(e.mmi||0).toFixed(0)} (${e.mmiDesc||''}) | S: ${e.swave||0}s${feltStr}</div>
+  `;
+  return div;
+}
+
+function buildWaveformItem(e) {
+  const div = document.createElement('div');
+  const levelColor = e.alertLevel === 'critical' ? 'var(--red)' :
+                     e.alertLevel === 'warning' ? 'var(--orange)' : 'var(--yellow)';
+  const srcClass = e.alertLevel === 'critical' ? 'source-seedlink' :
+                   e.alertLevel === 'warning' ? 'source-emsc' : 'source-usgs';
+  div.className = `event-item ${e.alertLevel === 'critical' ? 'alert' : e.alertLevel === 'warning' ? 'new' : ''}`;
+
+  const ago = timeSince(e.time);
+  const utcTime = new Date(e.time).toISOString().replace('T',' ').slice(0,19) + ' UTC';
+  const coinStr = e.coincidenceStations?.length > 1
+    ? ` | ${e.coincidenceStations.length} stations` : '';
+
+  // Estimate if felt: CFT >= 3.0 typically corresponds to felt earthquake
+  const isFelt = (e.cft || 0) >= 3.0;
+  const feltBadge = isFelt
+    ? '<span class="felt-badge felt-yes">FELT</span>'
+    : '<span class="felt-badge felt-no">micro</span>';
+
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span class="mag" style="color:${levelColor}">\u26A1${e.mag.toFixed(1)}</span>
+      <span>${feltBadge}<span class="source-tag ${srcClass}">SL:${(e.alertLevel||'?').toUpperCase()}</span> <span class="time">${ago}</span></span>
+    </div>
+    <div>${e.place}</div>
+    <div class="impact"><span style="color:#666">${utcTime}</span> | CFT: ${(e.cft||0).toFixed(1)} | ${e.triggerStation || '?'}${coinStr}</div>
+  `;
+  return div;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BACKEND WEBSOCKET (SeedLink + consolidated data, ~2-5s latency)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function connectBackend() {
+  if (backendWs && backendWs.readyState <= 1) return;
+
+  try {
+    backendWs = new WebSocket('ws://localhost:8768');
+
+    backendWs.onopen = () => {
+      backendConnected = true;
+      updateBackendStatus();
+      console.log('[BACKEND] WebSocket connected');
+    };
+
+    backendWs.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        handleBackendMessage(msg);
+      } catch(e) { console.warn('[BACKEND] Parse error:', e); }
+    };
+
+    backendWs.onclose = () => {
+      backendConnected = false;
+      updateBackendStatus();
+      console.log('[BACKEND] WebSocket closed, reconnecting in 3s...');
+      backendReconnectTimer = setTimeout(connectBackend, 3000);
+    };
+
+    backendWs.onerror = () => {
+      backendConnected = false;
+      updateBackendStatus();
+    };
+  } catch(e) {
+    console.warn('[BACKEND] Failed to connect:', e);
+    backendConnected = false;
+    setTimeout(connectBackend, 10000);
+  }
+}
+
+function handleBackendMessage(msg) {
+  switch(msg.type) {
+    case 'event':
+      handleBackendEvent(msg);
+      break;
+    case 'alert':
+      handleBackendAlert(msg);
+      break;
+    case 'waveform':
+      handleWaveform(msg);
+      break;
+    case 'status':
+      handleBackendStatusMsg(msg);
+      break;
+    case 'history':
+      handleBackendHistory(msg);
+      break;
+    case 'testimonies':
+      handleTestimonies(msg);
+      break;
+    case 'tsunami':
+      handleTsunamiAlert(msg);
+      break;
+  }
+}
+
+function handleBackendEvent(msg) {
+  const e = msg.event;
+  if (!e || !e.id) return;
+
+  const sources = (e.sources || [e.source]).join('+');
+  const isWaveformAlert = e.type === 'waveform_alert';
+  const sourceTag = isWaveformAlert ? `SL:${(e.alert_level||'?').toUpperCase()}` :
+                    sources.includes('seedlink') ? 'SeedLink' :
+                    sources.includes('emsc') ? 'EMSC' : 'USGS';
+
+  // Build frontend event from backend data
+  const caracas = e.caracas || {};
+  const evt = {
+    id: e.id,
+    mag: e.mag || 0,
+    lat: e.lat || 0,
+    lon: e.lon || 0,
+    depth: e.depth || 10,
+    place: e.place || '?',
+    time: (e.time || 0) * 1000, // unix s → ms
+    distKm: caracas.dist_km || 0,
+    pga_basin: caracas.pga_soil || 0,
+    pga_rock: caracas.pga_rock || 0,
+    pga_84: caracas.pga_soil84 || 0,
+    mmi: caracas.mmi || 0,
+    mmiDesc: caracas.mmi_desc || '',
+    swave: caracas.swave_s || 0,
+    level: caracas.alarm_level || 'none',
+    isNew: msg.action === 'create',
+    source: sourceTag,
+    sources: sources,
+    isWaveformAlert: isWaveformAlert,
+    alertLevel: e.alert_level || null,
+    cft: e.cft || 0,
+    triggerStation: e.trigger_station || '',
+    coincidenceStations: e.coincidence_stations || [],
+  };
+
+  if (msg.action === 'create' && !knownEventIds.has(e.id)) {
+    knownEventIds.add(e.id);
+    allEvents.unshift(evt);
+    allEvents.sort((a,b) => b.time - a.time);
+
+    console.log(`[BACKEND] New event: M${evt.mag.toFixed(1)} ${evt.place} [${sources}]`);
+
+    // Only trigger alarm for RECENT events (< 5 min old) — don't alarm on historical data
+    const eventAge = Date.now() - evt.time;
+    if (evt.level !== 'none' && evt.level !== 'info' && eventAge < 300000) {
+      triggerAlarm(evt.level, evt.mag, `[${sourceTag}] ${evt.place}`);
+    }
+  } else if (msg.action === 'update') {
+    const existing = allEvents.find(x => x.id === e.id);
+    if (existing) {
+      Object.assign(existing, evt, { isNew: false });
+    }
+  }
+
+  updateUI();
+  updateMap();
+}
+
+function handleBackendAlert(msg) {
+  const e = msg.event;
+  if (!e) return;
+  const level = msg.level || 'medium';
+  triggerAlarm(level, e.mag, `[BACKEND ALERT] ${e.place || '?'}`);
+}
+
+function handleBackendHistory(msg) {
+  if (!msg.events || !Array.isArray(msg.events)) return;
+
+  for (const e of msg.events) {
+    if (!e.id || knownEventIds.has(e.id)) continue;
+    knownEventIds.add(e.id);
+
+    const caracas = e.caracas || {};
+    allEvents.push({
+      id: e.id, mag: e.mag||0, lat: e.lat||0, lon: e.lon||0,
+      depth: e.depth||10, place: e.place||'?',
+      time: (e.time||0)*1000,
+      distKm: caracas.dist_km||0, pga_basin: caracas.pga_soil||0,
+      mmi: caracas.mmi||0, mmiDesc: caracas.mmi_desc||'',
+      swave: caracas.swave_s||0, level: caracas.alarm_level||'none',
+      isNew: false,
+      source: (e.sources||[e.source]).join('+'),
+    });
+  }
+
+  allEvents.sort((a,b) => b.time - a.time);
+  updateUI();
+  updateMap();
+}
+
+function handleWaveform(msg) {
+  if (msg.data && Array.isArray(msg.data) && msg.station) {
+    waveformStations[msg.station] = {
+      data: msg.data,
+      sps: msg.sps || 50,
+      cft: msg.cft || 0,
+      seconds: msg.seconds || 60,
+    };
+    // Redraw will happen on next animation frame
+    if (!seismogramAnimFrame) {
+      seismogramAnimFrame = requestAnimationFrame(() => {
+        seismogramAnimFrame = null;
+        drawSeismogram();
+      });
+    }
+  }
+}
+
+function handleTestimonies(msg) {
+  if (msg.event_id && msg.count > 0) {
+    const evt = allEvents.find(e => e.id === msg.event_id);
+    if (evt) {
+      evt.feltReports = msg.count;
+      evt.feltMaxIntensity = msg.max_intensity;
+      updateUI();
+    }
+  }
+}
+
+let tsunamiLayers = [];
+
+function handleTsunamiAlert(msg) {
+  const banner = document.getElementById('tsunamiBanner');
+  if (!banner) return;
+
+  if (msg.active && msg.alert) {
+    const a = msg.alert;
+    const severityColor = {warning:'#ff4444', watch:'#ffaa00', advisory:'#ffcc00', information:'#44aaff'}[a.severity] || '#44aaff';
+    banner.className = 'active';
+    banner.style.color = severityColor;
+    banner.style.borderColor = severityColor;
+    banner.innerHTML = `TSUNAMI ${a.severity.toUpperCase()}: ${a.title} ${a.region ? '— ' + a.region : ''} <span style="font-size:0.8em;color:#888">(Source: ${a.source})</span>`;
+
+    // Draw tsunami threat zone on map — coastal strip along Venezuela
+    clearTsunamiLayers();
+    if (map) {
+      // Venezuela/Caribbean coastline threat zones
+      const coastZones = [
+        // Venezuela north coast
+        [[12.0,-71.0],[11.8,-70.5],[11.5,-70.0],[11.0,-69.5],[10.8,-69.0],[10.7,-68.0],[10.6,-67.5],[10.5,-67.0],[10.6,-66.5],[10.7,-66.0],[10.8,-65.5],[10.8,-65.0],[10.7,-64.5],[10.6,-64.0],[10.5,-63.5],[10.5,-63.0],[10.6,-62.5]],
+      ];
+      coastZones.forEach(zone => {
+        const poly = L.polyline(zone, {
+          color: severityColor, weight: 4, opacity: 0.7, dashArray: '8 4',
+        }).addTo(map);
+        tsunamiLayers.push(poly);
+        // 30km coastal buffer
+        zone.forEach(([lat,lon]) => {
+          const c = L.circle([lat, lon], {
+            radius: 30000, color: severityColor, fillColor: severityColor,
+            fillOpacity: 0.08, weight: 0, opacity: 0,
+          }).addTo(map);
+          tsunamiLayers.push(c);
+        });
+      });
+    }
+  } else {
+    banner.className = '';
+    banner.innerHTML = '';
+    clearTsunamiLayers();
+  }
+}
+
+function clearTsunamiLayers() {
+  tsunamiLayers.forEach(l => { if (map) map.removeLayer(l); });
+  tsunamiLayers = [];
+}
+
+function handleBackendStatusMsg(msg) {
+  const slDot = document.getElementById('slDot');
+  const emscBeDot = document.getElementById('emscBeDot');
+  const usgsBeDot = document.getElementById('usgsBeDot');
+
+  if (slDot) {
+    const slConnected = msg.seedlink?.connected || false;
+    slDot.style.background = slConnected ? 'var(--green)' : 'var(--red)';
+  }
+  if (emscBeDot) {
+    emscBeDot.style.background = msg.emsc ? 'var(--green)' : 'var(--red)';
+  }
+  if (usgsBeDot) {
+    usgsBeDot.style.background = msg.usgs ? 'var(--green)' : 'var(--red)';
+  }
+}
+
+function updateBackendStatus() {
+  const dot = document.getElementById('backendDot');
+  const label = document.getElementById('backendLabel');
+  if (dot) dot.style.background = backendConnected ? 'var(--green)' : 'var(--red)';
+  if (label) label.textContent = backendConnected ? 'CONNECTED' : 'OFFLINE';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE SEISMOGRAM — MULTI-STATION STACKED VIEW
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Station metadata: distance to Caracas in km
+const STATION_INFO = {
+  'VE.FUNV': { name:'FUNVISIS, Caracas', dist:0, color:'#ff4444' },
+  'VE.GUIV': { name:'Guiria, VE', dist:500, color:'#ff8844' },
+  'VE.CURV': { name:'Curarigua, VE', dist:300, color:'#ffaa44' },
+  'IU.SDV':  { name:'Santo Domingo, VE', dist:440, color:'#22cc44' },
+  'CU.GRTK': { name:'Grand Turk', dist:1100, color:'#44aaff' },
+  'CU.BCIP': { name:'Barro Colorado, PA', dist:1700, color:'#8888ff' },
+  'IU.SJG':  { name:'San Juan, PR', dist:900, color:'#cc88ff' },
+  'CM.BAR2': { name:'Barranquilla, CO', dist:1100, color:'#ff88cc' },
+};
+
+function getStationKey(fullId) {
+  const p = fullId.split('.');
+  return p[0] + '.' + p[1];
+}
+
+function drawSeismogram() {
+  const canvas = document.getElementById('seismogramCanvas');
+  if (!canvas) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.offsetWidth * dpr;
+  const h = canvas.height = canvas.offsetHeight * dpr;
+
+  ctx.fillStyle = '#080a0f';
+  ctx.fillRect(0, 0, w, h);
+
+  // Sort stations by distance to Caracas (closest first)
+  const stations = Object.keys(waveformStations).sort((a,b) => {
+    const da = (STATION_INFO[getStationKey(a)] || {}).dist || 9999;
+    const db = (STATION_INFO[getStationKey(b)] || {}).dist || 9999;
+    return da - db;
+  });
+
+  const n = stations.length;
+  if (n === 0) {
+    ctx.fillStyle = '#555';
+    ctx.font = `${14*dpr}px monospace`;
+    ctx.fillText('Waiting for SeedLink data...', 10*dpr, h/2);
+    return;
+  }
+
+  const rowH = h / n;
+  const pad = 3 * dpr;
+  const fontSize = Math.max(9*dpr, Math.min(12*dpr, rowH*0.2));
+
+  stations.forEach((stationId, idx) => {
+    const y0 = idx * rowH;
+    const ws = waveformStations[stationId];
+    const data = ws.data;
+    const key = getStationKey(stationId);
+    const info = STATION_INFO[key] || { name: key, dist: '?', color: '#22cc44' };
+
+    // Row separator
+    if (idx > 0) {
+      ctx.strokeStyle = '#1a1d27';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(w, y0); ctx.stroke();
+    }
+
+    // Center line
+    ctx.strokeStyle = '#111318';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y0+rowH/2); ctx.lineTo(w, y0+rowH/2); ctx.stroke();
+
+    if (data.length < 2) return;
+
+    // Auto-scale per station
+    let maxAmp = 1;
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i]);
+      if (v > maxAmp) maxAmp = v;
+    }
+    maxAmp *= 1.2;
+
+    // Waveform trace
+    ctx.strokeStyle = info.color;
+    ctx.lineWidth = dpr;
+    ctx.beginPath();
+    const len = data.length;
+    for (let i = 0; i < len; i++) {
+      const x = (i / len) * w;
+      const y = y0 + rowH/2 - (data[i] / maxAmp) * (rowH/2 - pad);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Station label (left)
+    ctx.fillStyle = info.color;
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`${key}`, 4*dpr, y0 + fontSize + 2*dpr);
+
+    // Distance label (right of station name)
+    ctx.fillStyle = '#666';
+    ctx.font = `${fontSize*0.85}px monospace`;
+    ctx.fillText(`${info.dist}km`, 4*dpr + ctx.measureText(key+'  ').width, y0 + fontSize + 2*dpr);
+
+    // CFT indicator (STA/LTA ratio)
+    if (ws.cft > 0) {
+      const cftColor = ws.cft >= 3.0 ? '#ff2222' : ws.cft >= 2.0 ? '#ffcc00' : '#333';
+      ctx.fillStyle = cftColor;
+      ctx.font = `${fontSize*0.8}px monospace`;
+      ctx.textAlign = 'right';
+      ctx.fillText(`CFT:${ws.cft.toFixed(1)}`, w - 4*dpr, y0 + fontSize + 2*dpr);
+      ctx.textAlign = 'left';
+    }
+  });
+
+  // Time label bottom-right
+  const firstStation = waveformStations[stations[0]];
+  if (firstStation) {
+    const secs = Math.round(firstStation.data.length / (firstStation.sps || 50));
+    ctx.fillStyle = '#444';
+    ctx.font = `${10*dpr}px monospace`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`${secs}s`, w - 4*dpr, h - 4*dpr);
+    ctx.textAlign = 'left';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STARTUP
+// ═══════════════════════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  fetchData();
+
+  // Connect backend WebSocket (SeedLink + consolidated data)
+  connectBackend();
+
+  // Connect EMSC WebSocket for real-time push (fallback if backend down)
+  connectEMSC();
+
+  // USGS polling as fallback (every 15s)
+  refreshTimer = setInterval(fetchData, REFRESH_INTERVAL);
+
+  // Countdown display
+  countdownTimer = setInterval(() => {
+    countdown = Math.max(0, countdown - 1);
+    document.getElementById('nextUpdate').textContent = countdown;
+  }, 1000);
+
+  // Keep screen awake
+  if ('wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').catch(() => {});
+  }
+});
+
+// Prevent sleep
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && 'wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').catch(() => {});
+  }
+});
+</script>
+
+</body>
+</html>
