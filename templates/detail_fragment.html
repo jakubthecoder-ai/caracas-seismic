@@ -67,8 +67,18 @@
 
 <!-- Seismogram -->
 <div class="detail-section">
-  <h3>{{ t('seismograms') }}</h3>
-  <canvas id="seismogramCanvas"></canvas>
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+    <h3 style="margin-bottom:0;">{{ t('seismograms') }}</h3>
+    <div style="display:flex; align-items:center; gap:12px; font-size:0.75em;">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:#888;">
+        <input type="checkbox" id="wfHiRes" style="accent-color:#44aaff;"> HD
+      </label>
+      <button id="wfToggle" onclick="toggleWaveforms()" style="background:rgba(68,170,255,0.1);color:#44aaff;border:1px solid #44aaff;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:1em;font-weight:600;">
+        &#9654; {{ t('waveforms') }}
+      </button>
+    </div>
+  </div>
+  <canvas id="seismogramCanvas" style="display:none;"></canvas>
 </div>
 
 <!-- Tabs: Events / Waveforms -->

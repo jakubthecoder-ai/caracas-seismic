@@ -267,6 +267,8 @@ class HTTPServer:
         self.emsc_client = emsc_client
         self.usgs_poller = usgs_poller
         self.sse_clients: set = set()
+        self._sse_wf_prefs: dict = {}  # resp_id -> {enabled: bool, hires: bool}
+        self._sse_prev_wf: dict = {}   # resp_id -> {station: data_list} for delta
         self._app = None
         self._prev_alarm_level = 'none'
 
@@ -292,6 +294,7 @@ class HTTPServer:
         app.router.add_get('/', self._handle_index)
         app.router.add_get('/details', self._handle_details)
         app.router.add_get('/sse', self._handle_sse)
+        app.router.add_get('/sse/waveform-pref', self._handle_wf_pref)
         app.router.add_static('/static', str(BASE_DIR / 'static'))
 
         self._app = app
@@ -429,7 +432,9 @@ class HTTPServer:
             events = self.consolidator.get_recent_events(20)
             await self._sse_send(resp, 'history', {'events': events})
 
+        resp_id = id(resp)
         self.sse_clients.add(resp)
+        self._sse_wf_prefs[resp_id] = {'enabled': False, 'hires': False}
         logger.info("SSE client connected (%d total)", len(self.sse_clients))
 
         try:
@@ -441,9 +446,27 @@ class HTTPServer:
             pass
         finally:
             self.sse_clients.discard(resp)
+            self._sse_wf_prefs.pop(resp_id, None)
+            self._sse_prev_wf.pop(resp_id, None)
             logger.info("SSE client disconnected (%d remaining)", len(self.sse_clients))
 
         return resp
+
+    async def _handle_wf_pref(self, request):
+        """Set waveform streaming preference for SSE clients."""
+        enabled = request.query.get('enabled', '0') == '1'
+        hires = request.query.get('hires', '0') == '1'
+        # Apply to all connected clients from this IP (simple approach)
+        for resp in self.sse_clients:
+            rid = id(resp)
+            old_prefs = self._sse_wf_prefs.get(rid, {})
+            self._sse_wf_prefs[rid] = {'enabled': enabled, 'hires': hires}
+            # Clear prev data when disabled or hires changes (forces full resend)
+            if not enabled or old_prefs.get('hires') != hires:
+                to_remove = [k for k in self._sse_prev_wf if k.startswith(f'{rid}:')]
+                for k in to_remove:
+                    del self._sse_prev_wf[k]
+        return self._web.Response(text='ok')
 
     async def sse_broadcast(self, message: dict):
         """Broadcast a message to all SSE clients (called from consolidator/etc)."""
@@ -529,28 +552,94 @@ class HTTPServer:
             self.sse_clients -= dead
 
     async def _waveform_broadcast_loop(self):
-        """Broadcast waveform data every 2 seconds for near-real-time seismograms."""
+        """Broadcast waveform data every 2 seconds for near-real-time seismograms.
+
+        Per-client filtering:
+        - Only send to clients with waveforms enabled
+        - Delta mode: send only new samples since last broadcast
+        - HD mode: less decimation (target_sps=100 vs default 25)
+        """
         while True:
             await asyncio.sleep(2.0)
 
             if not self.sse_clients or not self.detector:
                 continue
 
-            sent = set()
-            dead = set()
-            for station_id, buf in self.detector.buffers.items():
+            # Find which clients want waveforms
+            enabled_clients = []
+            for client in self.sse_clients.copy():
+                rid = id(client)
+                prefs = self._sse_wf_prefs.get(rid, {})
+                if prefs.get('enabled', False):
+                    enabled_clients.append(client)
+
+            if not enabled_clients:
+                continue
+
+            # Collect station snippets (two versions: normal and hires)
+            station_ids = []
+            for station_id in self.detector.buffers:
                 if not station_id.endswith('BHZ'):
                     continue
                 base = '.'.join(station_id.split('.')[:2])
-                if base in sent:
-                    continue
-                snippet = self.detector.get_waveform_snippet(station_id, seconds=60)
-                if snippet and len(snippet.get('data', [])) > 10:
-                    wf_msg = {'type': 'waveform', **snippet}
-                    for client in self.sse_clients.copy():
-                        try:
-                            await self._sse_send(client, 'waveform', wf_msg)
-                        except Exception:
-                            dead.add(client)
-                    sent.add(base)
+                if base not in ['.'.join(s.split('.')[:2]) for s in station_ids]:
+                    station_ids.append(station_id)
+
+            dead = set()
+            for client in enabled_clients:
+                rid = id(client)
+                prefs = self._sse_wf_prefs.get(rid, {})
+                hires = prefs.get('hires', False)
+                target_sps = 100.0 if hires else 25.0
+
+                for station_id in station_ids:
+                    snippet = self.detector.get_waveform_snippet(
+                        station_id, seconds=60, target_sps=target_sps
+                    )
+                    if not snippet or len(snippet.get('data', [])) <= 10:
+                        continue
+
+                    full_data = snippet['data']
+                    prev_key = f'{rid}:{station_id}'
+
+                    # Delta mode: send only new samples
+                    prev_data = self._sse_prev_wf.get(prev_key)
+                    if prev_data is not None and len(prev_data) > 0:
+                        # Find how many old samples overlap
+                        # Since we decimate to fixed sps, 2s of new data =
+                        # ~target_sps * 2 new samples at the end
+                        new_count = int(target_sps * 2.5)  # slight overlap margin
+                        if len(full_data) > new_count:
+                            delta = full_data[-new_count:]
+                            wf_msg = {
+                                'type': 'waveform',
+                                'station': snippet['station'],
+                                'sps': snippet['sps'],
+                                'data': delta,
+                                'cft': snippet['cft'],
+                                'seconds': snippet['seconds'],
+                                'delta': True,
+                            }
+                        else:
+                            wf_msg = {'type': 'waveform', **snippet, 'delta': False}
+                    else:
+                        # First send — full data
+                        wf_msg = {'type': 'waveform', **snippet, 'delta': False}
+
+                    self._sse_prev_wf[prev_key] = full_data
+
+                    try:
+                        await self._sse_send(client, 'waveform', wf_msg)
+                    except Exception:
+                        dead.add(client)
+                        break  # skip remaining stations for dead client
+
             self.sse_clients -= dead
+            # Clean up prefs for dead clients
+            for client in dead:
+                rid = id(client)
+                self._sse_wf_prefs.pop(rid, None)
+                # Clean prev_wf entries for this client
+                to_remove = [k for k in self._sse_prev_wf if k.startswith(f'{rid}:')]
+                for k in to_remove:
+                    del self._sse_prev_wf[k]

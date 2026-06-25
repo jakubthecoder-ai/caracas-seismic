@@ -257,7 +257,8 @@ class Detector:
         ml_est = np.log10(amplitude) - 1.0
         return round(max(1.0, min(9.0, ml_est)), 1)
 
-    def get_waveform_snippet(self, station_id: str, seconds: float = 60.0) -> Optional[dict]:
+    def get_waveform_snippet(self, station_id: str, seconds: float = 60.0,
+                              target_sps: float = 50.0) -> Optional[dict]:
         with self._lock:
             buf = self.buffers.get(station_id)
             if buf is None or buf.sps is None:
@@ -266,7 +267,7 @@ class Detector:
             n_samples = int(seconds * buf.sps)
             data = buf.data[-n_samples:] if len(buf.data) >= n_samples else buf.data
 
-            decimate_factor = max(1, int(buf.sps / 50))
+            decimate_factor = max(1, int(buf.sps / target_sps))
             decimated = data[::decimate_factor]
 
             return {

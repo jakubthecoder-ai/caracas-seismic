@@ -20,6 +20,8 @@
   let ghostRings = [];
   let ghostAnimFrame = null;
   let seismogramData = {};  // station -> {data, sps}
+  let waveformsEnabled = false;
+  let waveformHiRes = false;
   let allEvents = [];       // track events for map features
   let lastAlarmTime = 0;
 
@@ -74,8 +76,19 @@
   });
 
   sse.addEventListener('waveform', function (e) {
-    if (!detailsVisible) return;
+    if (!detailsVisible || !waveformsEnabled) return;
     var d = JSON.parse(e.data);
+    // Delta mode: server sends delta=true with only new samples in data
+    if (d.delta && seismogramData[d.station]) {
+      var prev = seismogramData[d.station].data || [];
+      var newSamples = d.data;
+      // Append new samples, trim from front to keep ~60s of data
+      var merged = prev.concat(newSamples);
+      var maxSamples = Math.ceil((d.sps || 25) * 60);
+      if (merged.length > maxSamples) merged = merged.slice(merged.length - maxSamples);
+      d.data = merged;
+    }
+    d.delta = false;
     seismogramData[d.station] = d;
     drawSeismogram();
   });
@@ -578,6 +591,26 @@
       count.textContent = '(' + n + ')';
     }
   }
+
+  // --- Waveform Toggle ---
+  window.toggleWaveforms = function () {
+    waveformsEnabled = !waveformsEnabled;
+    var btn = document.getElementById('wfToggle');
+    var canvas = document.getElementById('seismogramCanvas');
+    if (btn) btn.innerHTML = waveformsEnabled ? '\u23F8 ' + (window.I18N.waveforms || 'ONDAS') : '\u25B6 ' + (window.I18N.waveforms || 'ONDAS');
+    if (canvas) canvas.style.display = waveformsEnabled ? 'block' : 'none';
+    // Notify server
+    fetch('/sse/waveform-pref?enabled=' + (waveformsEnabled ? '1' : '0') + '&hires=' + (waveformHiRes ? '1' : '0')).catch(function () {});
+    if (!waveformsEnabled) seismogramData = {};
+  };
+
+  // HD checkbox
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'wfHiRes') {
+      waveformHiRes = e.target.checked;
+      fetch('/sse/waveform-pref?enabled=' + (waveformsEnabled ? '1' : '0') + '&hires=' + (waveformHiRes ? '1' : '0')).catch(function () {});
+    }
+  });
 
   // --- Seismogram Canvas ---
   function drawSeismogram() {
