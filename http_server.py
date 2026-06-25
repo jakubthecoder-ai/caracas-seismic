@@ -75,7 +75,8 @@ class AlarmManager:
         self.waveform_level = 'none'
         self.catalog_level = 'none'
         self.output_level = 'none'
-        self.reason = ''
+        self.reason_key = ''
+        self.reason_params = {}
         self.max_cft = 0.0
         self.max_cft_station = ''
 
@@ -99,10 +100,8 @@ class AlarmManager:
             self.catalog_level = alarm
             self._catalog_until = time.time() + self.CATALOG_MIN_DURATION
             self.last_event = event
-            self._update_output(
-                reason=self._format_catalog_reason(event),
-                event=event,
-            )
+            key, params = self._catalog_reason_key(event)
+            self._update_output(reason_key=key, reason_params=params, event=event)
 
     def update_waveform(self, stations: list, detector=None):
         """
@@ -136,7 +135,8 @@ class AlarmManager:
         cft_jump = max_cft - self._prev_max_cft
         if cft_jump > self.SPIKE_THRESHOLD and max_cft > self.SPIKE_MIN_CFT:
             self._set_waveform_level('critical', now,
-                                     f'P-wave spike: CFT {max_cft:.1f} at {self.max_cft_station}')
+                                     reason_key='alert_spike',
+                                     reason_params={'station': self.max_cft_station})
             self._prev_max_cft = max_cft
             return
 
@@ -146,16 +146,21 @@ class AlarmManager:
             if max_cft > on_thresh:
                 self._above_since.setdefault(level, now)
                 if now - self._above_since[level] >= sustain_s:
+                    wf_keys = {
+                        'elevated': ('alert_waveform', {'station': self.max_cft_station}),
+                        'warning': ('alert_waveform_warning', {}),
+                        'critical': ('alert_waveform_critical', {}),
+                    }
                     # Warning requires corroboration
                     if level == 'warning':
                         corroborated = sum(1 for c in primary_cfts if c > 2.0) >= 2
                         catalog_match = LEVEL_ORDER.get(self.catalog_level, 0) > 0
                         if corroborated or catalog_match:
-                            self._set_waveform_level(level, now,
-                                                     f'Sustained CFT {max_cft:.1f} at {self.max_cft_station} (corroborated)')
+                            key, params = wf_keys[level]
+                            self._set_waveform_level(level, now, reason_key=key, reason_params=params)
                     else:
-                        reason = f'Sustained CFT {max_cft:.1f} at {self.max_cft_station}'
-                        self._set_waveform_level(level, now, reason)
+                        key, params = wf_keys[level]
+                        self._set_waveform_level(level, now, reason_key=key, reason_params=params)
             else:
                 self._above_since.pop(level, None)
 
@@ -183,13 +188,14 @@ class AlarmManager:
 
         self._prev_max_cft = max_cft
 
-    def _set_waveform_level(self, level: str, now: float, reason: str = ''):
+    def _set_waveform_level(self, level: str, now: float,
+                            reason_key: str = '', reason_params: dict = None):
         """Set waveform alarm level (only escalate, never downgrade here)."""
         if LEVEL_ORDER.get(level, 0) > LEVEL_ORDER.get(self.waveform_level, 0):
             self.waveform_level = level
             self._last_trigger_time = now
-            self.reason = reason
-            self._update_output(reason=reason)
+            self._update_output(reason_key=reason_key,
+                                reason_params=reason_params or {})
 
     def _deescalate_waveform(self, from_level: str, now: float):
         """De-escalate waveform alarm by one step."""
@@ -200,7 +206,8 @@ class AlarmManager:
             self._below_since.pop(from_level, None)
             self._update_output()
 
-    def _update_output(self, reason: str = '', event: dict = None):
+    def _update_output(self, reason_key: str = '', reason_params: dict = None,
+                       event: dict = None):
         """Compute output alarm level = max(catalog, waveform)."""
         wf_order = LEVEL_ORDER.get(self.waveform_level, 0)
         cat_order = LEVEL_ORDER.get(self.catalog_level, 0)
@@ -214,27 +221,30 @@ class AlarmManager:
         if new_level == 'elevated':
             new_level = 'none'
 
-        if reason:
-            self.reason = reason
+        if reason_key:
+            self.reason_key = reason_key
+            self.reason_params = reason_params or {}
 
         self.output_level = new_level
 
-    def _format_catalog_reason(self, event: dict) -> str:
-        """Format alarm reason text from a catalog event."""
+    def _catalog_reason_key(self, event: dict) -> tuple:
+        """Return (i18n_key, params) for a catalog event alarm."""
         mag = event.get('mag', 0)
         place = event.get('place', '')
         level = event.get('caracas', {}).get('alarm_level', 'none')
+        params = {'mag': f'{mag:.1f}', 'place': place}
         if level == 'critical':
-            return f'M{mag:.1f} — {place} — POTENTIAL STRONG SHAKING'
+            return 'alert_critical', params
         if level == 'high':
-            return f'M{mag:.1f} — {place} — Moderate shaking possible'
-        return f'M{mag:.1f} — {place} — Activity detected'
+            return 'alert_high', params
+        return 'alert_medium', params
 
     def get_state(self) -> dict:
         """Get current alarm state for SSE push."""
         return {
             'level': self.output_level,
-            'reason': self.reason,
+            'reason_key': self.reason_key,
+            'reason_params': self.reason_params,
             'cft': self.max_cft,
             'station': self.max_cft_station,
             'waveform_level': self.waveform_level,
@@ -307,9 +317,11 @@ class HTTPServer:
         alarm_state = self.alarm.get_state()
         alarm_level = alarm_state['level']
 
-        # Format alarm text
-        if alarm_level in ('critical', 'high', 'warning', 'medium'):
-            alarm_text = alarm_state.get('reason', t('no_threat', lang))
+        # Format alarm text in the correct language
+        reason_key = alarm_state.get('reason_key', '')
+        reason_params = alarm_state.get('reason_params', {})
+        if alarm_level in ('critical', 'high', 'warning', 'medium') and reason_key:
+            alarm_text = t(reason_key, lang, **reason_params)
         else:
             alarm_text = t('no_threat', lang)
 
