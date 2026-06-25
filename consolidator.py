@@ -14,9 +14,11 @@ from gmpe import caracas_impact
 
 logger = logging.getLogger(__name__)
 
-# Dedup window: events within this time/distance are considered the same
-DEDUP_TIME_WINDOW = 120.0   # seconds
-DEDUP_DIST_THRESHOLD = 100.0  # km
+# Dedup window: events within this time/distance/magnitude are considered the same
+# Tight window to avoid merging aftershocks with mainshock
+DEDUP_TIME_WINDOW = 30.0    # seconds
+DEDUP_DIST_THRESHOLD = 50.0  # km
+DEDUP_MAG_THRESHOLD = 1.0    # max magnitude difference
 
 # Rolling event list retention
 MAX_EVENTS = 500
@@ -245,13 +247,14 @@ class Consolidator:
                     return existing
                 continue
 
-            # Location check
+            # Location + magnitude check
             try:
                 dist = haversine(
                     existing['lat'], existing['lon'],
                     event['lat'], event['lon']
                 )
-                if dist < DEDUP_DIST_THRESHOLD:
+                mag_diff = abs(existing.get('mag', 0) - event.get('mag', 0))
+                if dist < DEDUP_DIST_THRESHOLD and mag_diff < DEDUP_MAG_THRESHOLD:
                     return existing
             except Exception:
                 continue

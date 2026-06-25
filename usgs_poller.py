@@ -1,7 +1,7 @@
 """
 USGS GeoJSON Earthquake Feed Poller.
 
-Polls all_hour.geojson every 15 seconds, filters by Caribbean/Venezuela region,
+Polls hourly + daily feeds, filters by Caribbean/Venezuela region,
 deduplicates by event ID, emits new events to the consolidator queue.
 """
 
@@ -23,11 +23,8 @@ FEEDS = {
 LAT_MIN, LAT_MAX = 6.0, 16.0
 LON_MIN, LON_MAX = -76.0, -58.0
 
-POLL_INTERVAL = 2  # seconds
-
-# Caracas coordinates for 300km radius aggregation
-CARACAS_LAT, CARACAS_LON = 10.4806, -66.9036
-CARACAS_RADIUS_KM = 300
+HOUR_INTERVAL = 2     # seconds between hourly feed polls
+DAY_INTERVAL = 300    # seconds between daily feed polls (5 min)
 
 
 def in_region(lat: float, lon: float) -> bool:
@@ -71,29 +68,44 @@ class USGSPoller:
         self.known_ids: set = set()
         self.connected = False
         self._session: Optional[aiohttp.ClientSession] = None
+        self._last_day_poll: float = 0
 
     async def start(self):
         """Main polling loop."""
         self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30)
         )
-        logger.info("USGS poller starting (interval=%ds)", POLL_INTERVAL)
+        logger.info("USGS poller starting (hour=%ds, day=%ds)", HOUR_INTERVAL, DAY_INTERVAL)
+
+        # Seed DB: poll daily feed on startup to capture historical events
+        try:
+            await self._poll_feed(FEEDS['day25'], 'day25')
+            self._last_day_poll = time.time()
+            self.connected = True
+        except Exception as e:
+            logger.error("USGS initial day poll error: %s", e)
 
         while True:
             try:
-                await self._poll()
+                await self._poll_feed(FEEDS['hour'], 'hour')
+
+                # Poll daily feed every DAY_INTERVAL seconds
+                if time.time() - self._last_day_poll >= DAY_INTERVAL:
+                    await self._poll_feed(FEEDS['day25'], 'day25')
+                    self._last_day_poll = time.time()
+
                 self.connected = True
             except Exception as e:
                 logger.error("USGS poll error: %s", e)
                 self.connected = False
 
-            await asyncio.sleep(POLL_INTERVAL)
+            await asyncio.sleep(HOUR_INTERVAL)
 
-    async def _poll(self):
-        """Fetch hourly feed and emit new events."""
-        async with self._session.get(FEEDS['hour']) as resp:
+    async def _poll_feed(self, url: str, label: str = ''):
+        """Fetch a single USGS feed and emit new events."""
+        async with self._session.get(url) as resp:
             if resp.status != 200:
-                logger.warning("USGS HTTP %d", resp.status)
+                logger.warning("USGS %s HTTP %d", label, resp.status)
                 return
 
             data = await resp.json()
@@ -111,8 +123,8 @@ class USGSPoller:
                 await self.event_queue.put(event)
                 new_count += 1
                 logger.info(
-                    "USGS new event: M%.1f %s (%.2f, %.2f)",
-                    event['mag'], event['place'], event['lat'], event['lon']
+                    "USGS new event [%s]: M%.1f %s (%.2f, %.2f)",
+                    label, event['mag'], event['place'], event['lat'], event['lon']
                 )
 
         # Prune known IDs (keep last 500)
@@ -120,7 +132,7 @@ class USGSPoller:
             self.known_ids = set(list(self.known_ids)[-200:])
 
         if new_count:
-            logger.info("USGS: %d new events from %d total", new_count, len(features))
+            logger.info("USGS [%s]: %d new events from %d total", label, new_count, len(features))
 
     async def stop(self):
         if self._session:

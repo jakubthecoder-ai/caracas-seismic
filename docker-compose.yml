@@ -9,6 +9,7 @@ services:
       - SEISMIC_DB_PATH=/data/seismic_monitor.db
     volumes:
       - seismic_data:/data
+      - .:/app
     healthcheck:
       test: ["CMD", "python", "-c", "import websockets, asyncio; asyncio.run(websockets.connect('ws://localhost:8768').__aenter__())"]
       interval: 30s
