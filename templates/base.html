@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>{{ t('title') }}</title>
+<style>
+  :root { --bg:#0a0c10; --card:#12151c; --border:#1e2230; --red:#ff2222; --orange:#ff8800; --yellow:#ffcc00; --green:#22cc44; --blue:#44aaff; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:#e0e0e0; }
+
+  .topbar {
+    display:flex; align-items:center; justify-content:space-between;
+    background:#0d0f14; border-bottom:2px solid var(--border); padding:10px 20px;
+  }
+  .topbar h1 { font-size:1.1em; letter-spacing:1px; }
+  .topbar .live { display:flex; align-items:center; gap:8px; }
+  .live-dot { width:10px; height:10px; border-radius:50%; background:var(--green); animation:blink 1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .lang-link { color:var(--blue); text-decoration:none; font-size:0.85em; font-weight:600; padding:4px 10px; border:1px solid var(--border); border-radius:4px; }
+  .lang-link:hover { background:rgba(68,170,255,0.1); }
+
+  #banner {
+    padding:16px 20px; text-align:center; font-weight:700; font-size:1.3em;
+    letter-spacing:1px; transition:background 0.3s, color 0.3s;
+  }
+  .threat-none, .threat-info { background:#0a2a0a; color:var(--green); border-bottom:2px solid var(--green); }
+  .threat-low { background:#0a2a0a; color:var(--green); border-bottom:2px solid var(--green); }
+  .threat-elevated { background:#1a1a0a; color:var(--yellow); border-bottom:2px solid var(--yellow); }
+  .threat-warning, .threat-medium { background:#2a1a0a; color:var(--orange); border-bottom:2px solid var(--orange); animation:pulseOrange 1.5s infinite; }
+  .threat-critical, .threat-high { background:#2a0505; color:var(--red); border-bottom:2px solid var(--red); animation:pulseRed 0.8s infinite; }
+  @keyframes pulseOrange { 0%,100%{background:#2a1a0a} 50%{background:#3a2a0a} }
+  @keyframes pulseRed { 0%,100%{background:#2a0505} 50%{background:#4a0808} }
+
+  #tsunamiBanner {
+    display:none; padding:10px 20px; text-align:center; font-weight:700; font-size:1.1em;
+    background:#0a1a3a; color:#44aaff; border-bottom:2px solid #2266cc; animation:pulseTsunami 2s infinite;
+  }
+  #tsunamiBanner.active { display:block; }
+  @keyframes pulseTsunami { 0%,100%{background:#0a1a3a} 50%{background:#0a2a5a} }
+
+  #lastEvent {
+    padding:10px 20px; font-size:0.9em; color:#aaa; border-bottom:1px solid var(--border);
+    text-align:center;
+  }
+  #lastEvent strong { color:#e0e0e0; }
+
+  #miniSeismogram {
+    display:none; height:80px; padding:4px 20px; border-bottom:1px solid var(--border);
+    background:#0d0f14;
+  }
+  #miniSeismogram.active { display:block; }
+  #miniSeismogram svg { width:100%; height:100%; }
+
+  .toggle-wrap { text-align:center; padding:16px 20px; }
+  #toggleBtn {
+    background:rgba(68,170,255,0.1); color:var(--blue); border:1px solid var(--blue);
+    padding:12px 32px; font-size:1em; font-weight:600; border-radius:6px;
+    cursor:pointer; transition:all 0.2s; letter-spacing:0.5px;
+  }
+  #toggleBtn:hover { background:rgba(68,170,255,0.2); }
+
+  #details { display:none; }
+  #details.open { display:block; }
+
+  .conn-status {
+    text-align:center; padding:6px; font-size:0.7em; color:#555;
+    border-top:1px solid var(--border);
+  }
+  .conn-status .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:4px; }
+  .conn-status .dot-ok { background:var(--green); }
+  .conn-status .dot-err { background:var(--red); }
+
+  @media (max-width: 480px) {
+    .topbar h1 { font-size:0.85em; }
+    #banner { font-size:1em; padding:12px 10px; }
+    #toggleBtn { width:90%; padding:14px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="live">
+      <span class="live-dot" id="sseDot"></span>
+      <h1>{{ t('title') }}</h1>
+    </div>
+    <a class="lang-link" href="?lang={{ 'en' if lang == 'es' else 'es' }}">{{ t('lang_switch') }}</a>
+  </div>
+
+  <div id="banner" class="threat-{{ alarm_level }}">
+    {{ alarm_text }}
+  </div>
+
+  <div id="tsunamiBanner"></div>
+
+  <div id="miniSeismogram">
+    <svg id="miniSvg" viewBox="0 0 600 70" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div id="lastEvent">
+    {% if last_event %}
+    <strong>{{ t('last_event') }}:</strong> M{{ "%.1f"|format(last_event.mag) }} — {{ last_event.place or '?' }} — {{ last_event_time }}
+    {% else %}
+    {{ t('no_events') }}
+    {% endif %}
+  </div>
+
+  <div class="toggle-wrap">
+    <button id="toggleBtn" onclick="toggleDetails()">{{ t('show_details') }} &#9660;</button>
+  </div>
+
+  <div id="details"></div>
+
+  <div class="conn-status" id="connStatus">
+    <span class="dot dot-err" id="connDot"></span> {{ t('connecting') }}
+  </div>
+
+  <script>
+    window.LANG = '{{ lang }}';
+    window.I18N = {
+      show_details: '{{ t("show_details") }}',
+      hide_details: '{{ t("hide_details") }}',
+      no_threat: '{{ t("no_threat") }}',
+      alert_critical: '{{ t("alert_critical") }}',
+      alert_high: '{{ t("alert_high") }}',
+      alert_medium: '{{ t("alert_medium") }}',
+      alert_waveform: '{{ t("alert_waveform") }}',
+      notif_title: '{{ t("notif_title") }}',
+      connected: '{{ t("connected") }}',
+      connecting: '{{ t("connecting") }}',
+      offline: '{{ t("offline") }}',
+      tsunami_notif: '{{ t("tsunami_notif") }}',
+    };
+  </script>
+  <script src="/static/monitor.js"></script>
+</body>
+</html>

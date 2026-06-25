@@ -28,6 +28,7 @@ async def main():
     logger.info("  SEISMIC MONITOR — Caracas Earthquake Early Warning")
     logger.info("  Data sources: IRIS SeedLink + EMSC WS + USGS + RS + Felt")
     logger.info("  WebSocket server: ws://0.0.0.0:8768")
+    logger.info("  HTTP server:      http://0.0.0.0:8080")
     logger.info("=" * 60)
 
     # Shared event queue — all sources push here
@@ -71,15 +72,31 @@ async def main():
         usgs_poller=usgs,
     )
 
-    # Wire up callbacks
-    consolidator.broadcast = ws_server.broadcast
+    # Initialize HTTP server with SSE + AlarmManager
+    from http_server import HTTPServer, AlarmManager
+    alarm_manager = AlarmManager()
+    http_server = HTTPServer(
+        consolidator=consolidator,
+        detector=detector,
+        alarm_manager=alarm_manager,
+        seedlink_client=seedlink,
+        emsc_client=emsc,
+        usgs_poller=usgs,
+    )
+
+    # Broadcast fanout: send to both WS (legacy) and SSE clients
+    async def broadcast_fanout(message):
+        await ws_server.broadcast(message)
+        await http_server.sse_broadcast(message)
+
+    consolidator.broadcast = broadcast_fanout
 
     testimonies = EMSCTestimoniesClient(
         consolidator=consolidator,
-        broadcast_callback=ws_server.broadcast,
+        broadcast_callback=broadcast_fanout,
     )
 
-    tsunami = TsunamiPoller(broadcast_callback=ws_server.broadcast)
+    tsunami = TsunamiPoller(broadcast_callback=broadcast_fanout)
 
     # Detector callback — push detected events to queue (from thread)
     # Capture event loop reference before spawning threads
@@ -115,6 +132,7 @@ async def main():
         asyncio.create_task(usgs.start(), name='usgs'),
         asyncio.create_task(consolidator.start(), name='consolidator'),
         asyncio.create_task(ws_server.start(), name='ws_server'),
+        asyncio.create_task(http_server.start(), name='http_server'),
         asyncio.create_task(raspishake.start(), name='raspishake'),
         asyncio.create_task(testimonies.start(), name='testimonies'),
         asyncio.create_task(tsunami.start(), name='tsunami'),

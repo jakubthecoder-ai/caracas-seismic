@@ -45,6 +45,18 @@ COOLDOWN_CRITICAL = 180.0   # (raised from 120)
 # All others: require coincidence with primary OR 2+ secondary triggers
 PRIMARY_STATION_PREFIXES = ('IU.SDV', 'VE.FUNV', 'VE.GUIV', 'VE.CURV', 'CM.BAR2')
 
+# Station coordinates for map markers
+STATION_COORDS = {
+    'IU.SDV': {'lat': 8.88, 'lon': -70.63, 'name': 'Santo Domingo, VE'},
+    'VE.FUNV': {'lat': 10.51, 'lon': -66.93, 'name': 'Caracas (FUNVISIS)'},
+    'VE.GUIV': {'lat': 10.59, 'lon': -62.96, 'name': 'Guiria, VE'},
+    'VE.CURV': {'lat': 10.49, 'lon': -67.01, 'name': 'Curiepe, VE'},
+    'CM.BAR2': {'lat': 10.96, 'lon': -74.77, 'name': 'Barranquilla, CO'},
+    'IU.SJG': {'lat': 18.11, 'lon': -66.15, 'name': 'San Juan, PR'},
+    'CU.GRTK': {'lat': 21.52, 'lon': -71.13, 'name': 'Grand Turk'},
+    'CU.BCIP': {'lat': 9.17, 'lon': -79.84, 'name': 'Barro Colorado, PA'},
+}
+
 
 class StationBuffer:
     """Ring buffer for a single station's waveform data."""
@@ -264,6 +276,28 @@ class Detector:
                 'cft': buf.cft_value,
                 'seconds': len(data) / buf.sps if buf.sps > 0 else 0,
             }
+
+    def get_station_levels(self) -> list:
+        """Get current CFT/amplitude per BHZ station for map markers and alarm manager."""
+        with self._lock:
+            levels = []
+            for sid, buf in self.buffers.items():
+                if not sid.endswith('BHZ'):
+                    continue
+                # Look up coordinates by network.station prefix
+                prefix = '.'.join(sid.split('.')[:2])
+                coords = STATION_COORDS.get(prefix, {})
+                levels.append({
+                    'station': sid,
+                    'cft': round(buf.cft_value, 2),
+                    'amplitude': round(float(buf.data[-1]), 1) if buf.data else 0.0,
+                    'lat': coords.get('lat'),
+                    'lon': coords.get('lon'),
+                    'name': coords.get('name', prefix),
+                    'is_primary': self._is_primary(sid),
+                    'buffered_s': round(buf.seconds_buffered, 1),
+                })
+            return levels
 
     def get_status(self) -> dict:
         with self._lock:

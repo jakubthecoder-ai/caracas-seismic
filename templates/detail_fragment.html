@@ -1,0 +1,116 @@
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  .detail-section { padding:12px 16px; border-bottom:1px solid var(--border, #1e2230); }
+  .detail-section h3 { font-size:0.85em; color:#44aaff; margin-bottom:8px; letter-spacing:0.5px; }
+
+  #detailMap { width:100%; height:300px; border-radius:6px; background:#0a0c10; }
+
+  #seismogramCanvas { width:100%; height:180px; background:#0a0c10; border-radius:4px; }
+
+  .event-table { width:100%; font-size:0.8em; }
+  .event-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);
+  }
+  .event-row .mag {
+    font-weight:700; min-width:45px;
+    padding:2px 6px; border-radius:3px; text-align:center; font-size:0.9em;
+  }
+  .mag-low { background:rgba(34,204,68,0.15); color:#22cc44; }
+  .mag-mid { background:rgba(255,204,0,0.15); color:#ffcc00; }
+  .mag-high { background:rgba(255,136,0,0.15); color:#ff8800; }
+  .mag-crit { background:rgba(255,34,34,0.15); color:#ff2222; }
+  .event-row .place { flex:1; margin:0 8px; color:#ccc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .event-row .time { color:#888; font-size:0.85em; white-space:nowrap; }
+
+  .impact-grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+  }
+  .impact-item { background:rgba(255,255,255,0.03); padding:8px; border-radius:4px; }
+  .impact-item .label { font-size:0.7em; color:#888; text-transform:uppercase; }
+  .impact-item .value { font-size:1.1em; font-weight:600; color:#e0e0e0; margin-top:2px; }
+
+  .station-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:0.75em; color:#888; margin-top:8px; }
+  .station-legend .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:3px; }
+
+  @media (max-width: 480px) {
+    #detailMap { height:220px; }
+    #seismogramCanvas { height:140px; }
+    .impact-grid { grid-template-columns:1fr; }
+  }
+</style>
+
+<!-- Map -->
+<div class="detail-section">
+  <h3>{{ t('events_24h') }}</h3>
+  <div id="detailMap"></div>
+  <div class="station-legend">
+    <span><span class="dot" style="background:#22cc44"></span> CFT &lt; 1.5</span>
+    <span><span class="dot" style="background:#ffcc00"></span> CFT 1.5-2.5</span>
+    <span><span class="dot" style="background:#ff8800"></span> CFT 2.5-3.5</span>
+    <span><span class="dot" style="background:#ff2222"></span> CFT &gt; 3.5</span>
+  </div>
+</div>
+
+<!-- Seismogram -->
+<div class="detail-section">
+  <h3>{{ t('seismograms') }}</h3>
+  <canvas id="seismogramCanvas"></canvas>
+</div>
+
+<!-- Event list -->
+<div class="detail-section">
+  <h3>{{ t('events') }}</h3>
+  <div id="eventList">
+    {% for evt in events %}
+    <div class="event-row">
+      <span class="mag {% if evt.mag >= 6 %}mag-crit{% elif evt.mag >= 5 %}mag-high{% elif evt.mag >= 4 %}mag-mid{% else %}mag-low{% endif %}">
+        M{{ "%.1f"|format(evt.mag) }}
+      </span>
+      <span class="place">{{ evt.place or '?' }}</span>
+      <span class="time">{{ evt.time_ago }}</span>
+    </div>
+    {% endfor %}
+    {% if not events %}
+    <div style="color:#555; text-align:center; padding:20px;">{{ t('no_events') }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Caracas Impact -->
+{% if impact %}
+<div class="detail-section">
+  <h3>{{ t('impact_title') }}</h3>
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="label">{{ t('dist_caracas') }}</div>
+      <div class="value">{{ "%.0f"|format(impact.dist_km) }} km</div>
+    </div>
+    <div class="impact-item">
+      <div class="label">{{ t('pga_basin') }}</div>
+      <div class="value">{{ "%.1f"|format(impact.pga_soil) }} gal</div>
+    </div>
+    <div class="impact-item">
+      <div class="label">{{ t('est_mmi') }}</div>
+      <div class="value">{{ "%.1f"|format(impact.mmi) }} — {{ impact.mmi_desc }}</div>
+    </div>
+    <div class="impact-item">
+      <div class="label">{{ t('swave_arrival') }}</div>
+      <div class="value">{% if impact.swave_s %}{{ "%.0f"|format(impact.swave_s) }}s{% else %}—{% endif %}</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Station data attributes for JS map initialization -->
+<div id="stationData" style="display:none"
+  {% for s in stations %}
+  data-station-{{ loop.index }}='{{ s | tojson }}'
+  {% endfor %}
+  data-station-count="{{ stations | length }}"
+></div>
+
+<!-- Event data for JS map markers -->
+<div id="eventData" style="display:none"
+  data-events='{{ events_json }}'
+></div>
