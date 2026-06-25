@@ -145,20 +145,28 @@ def caracas_impact(mag: float, lat: float, lon: float, depth_km: float) -> dict:
         'mmi': mmi,
         'mmi_desc': mmi_description(mmi),
         'swave_s': round(swave_seconds(dist_km, depth_km), 1),
-        'alarm_level': alarm_level(mag, dist_km),
+        'alarm_level': alarm_level(mmi),
     }
 
 
-def alarm_level(mag: float, dist_km: float) -> str:
-    """Classify alarm severity based on magnitude and distance to Caracas."""
-    if mag >= 6.0 and dist_km < 400:
+def alarm_level(mmi: float) -> str:
+    """Classify alarm severity based on predicted MMI at Caracas.
+
+    Uses MMI thresholds grounded in actual felt intensity:
+      critical: MMI >= 6.0 (Strong — damage to weak structures)
+      high:     MMI >= 5.0 (Moderate — felt by everyone)
+      medium:   MMI >= 4.0 (Light — noticeable indoors)
+      low:      MMI >= 3.0 (Weak — felt by some indoors)
+      info:     MMI >= 2.0 (Weak — barely perceptible)
+    """
+    if mmi >= 6.0:
         return 'critical'
-    if mag >= 5.0 and dist_km < 300:
+    if mmi >= 5.0:
         return 'high'
-    if mag >= 4.5 and dist_km < 300:
+    if mmi >= 4.0:
         return 'medium'
-    if mag >= 4.0 and dist_km < 500:
+    if mmi >= 3.0:
         return 'low'
-    if mag >= 3.0 and dist_km < 200:
+    if mmi >= 2.0:
         return 'info'
     return 'none'

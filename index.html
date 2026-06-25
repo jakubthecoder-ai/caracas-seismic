@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>MONITOR DE TERREMOTOS CARACAS - EN VIVO</title>
+<title>MONITOR SÍSMICO CARACAS - EN VIVO</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -173,21 +173,43 @@
   .source-usgs { background:#0a1a3a; color:#44aaff; }
   .source-multi { background:#2a0a3a; color:#cc88ff; }
 
+  /* Sidebar toggle (mobile only) */
+  .sidebar-toggle {
+    display:none; /* hidden on desktop */
+    position:absolute; right:0; top:50%; transform:translateY(-50%);
+    width:32px; height:80px; background:rgba(12,15,22,0.85); backdrop-filter:blur(6px);
+    border:1px solid var(--border); border-right:none;
+    border-radius:8px 0 0 8px; cursor:pointer;
+    align-items:center; justify-content:center;
+    color:var(--blue); font-size:1.2em; z-index:1001;
+    transition: background 0.2s;
+  }
+  .sidebar-toggle:hover { background:rgba(30,34,48,0.9); }
+
   /* ── MOBILE RESPONSIVE ── */
   @media (max-width: 800px) {
     .topbar { flex-direction:column; gap:4px; padding:6px 10px; }
     .topbar h1 { font-size:0.95em; }
     .topbar .meta { text-align:left; font-size:0.65em; }
 
-    .main { grid-template-columns:1fr; grid-template-rows:40vh 1fr; height:auto; min-height:100vh; }
-    #map { min-height:40vh; }
+    .main { grid-template-columns:1fr; height:calc(100vh - 100px); }
+    #map { width:100%; height:100%; }
 
-    .sidebar { border-left:none; border-top:1px solid var(--border); }
+    /* Sidebar becomes right-side overlay on mobile */
+    .sidebar {
+      position:absolute; right:0; top:0; bottom:0; width:320px; z-index:1000;
+      background:rgba(12,15,22,0.95); backdrop-filter:blur(6px);
+      border-left:1px solid var(--border);
+      transition: transform 0.3s ease;
+      overflow-y:auto;
+    }
+    .sidebar.collapsed { transform:translateX(320px); }
+    .sidebar-toggle { display:flex; }
 
     .event-panel { width:280px; }
     .event-panel.collapsed { transform:translateX(-280px); }
 
-    .stats { grid-template-columns:1fr 1fr 1fr 1fr; gap:4px; padding:6px; }
+    .stats { grid-template-columns:1fr 1fr; gap:4px; padding:6px; }
     .stat .val { font-size:1.1em; }
     .stat .lbl { font-size:0.58em; }
 
@@ -212,10 +234,11 @@
   @media (max-width: 480px) {
     .topbar h1 { font-size:0.85em; }
 
-    .main { grid-template-rows:35vh 1fr; }
+    .sidebar { width:100%; }
+    .sidebar.collapsed { transform:translateX(100%); }
 
-    .event-panel { width:260px; }
-    .event-panel.collapsed { transform:translateX(-260px); }
+    .event-panel { width:100%; }
+    .event-panel.collapsed { transform:translateX(-100%); }
 
     .stats { grid-template-columns:1fr 1fr; }
 
@@ -246,17 +269,17 @@
 <div class="topbar">
   <div class="live">
     <div class="live-dot" id="liveDot"></div>
-    <h1>MONITOR SÍSMICO DE CARACAS</h1>
+    <h1 data-i18n="header">MONITOR SÍSMICO CARACAS</h1>
   </div>
   <div class="meta">
-    <div id="sourceStatus">Servidor: <span style="color:var(--yellow)">CONNECTING...</span> | USGS 2s | EMSC WS</div>
-    <div>Last USGS: <span id="lastUpdate">--</span> | Next: <span id="nextUpdate">--</span>s | <span class="live-dot" id="emscDot" style="display:inline-block;width:8px;height:8px;background:var(--yellow)"></span> EMSC | <span class="live-dot" style="display:inline-block;width:8px;height:8px;background:var(--yellow)" id="backendTopDot"></span> Backend
-    <a href="caracas_monitor.html" style="color:var(--blue);margin-left:8px;font-size:1.1em;text-decoration:none" title="English">EN</a></div>
+    <div id="sourceStatus">Backend: <span style="color:var(--yellow)">CONECTANDO...</span> | USGS 2s | EMSC WS</div>
+    <div><span data-i18n="lastUsgs">Últ. USGS</span>: <span id="lastUpdate">--</span> | <span data-i18n="nextLabel">Próx.</span>: <span id="nextUpdate">--</span>s | <span class="live-dot" id="emscDot" style="display:inline-block;width:8px;height:8px;background:var(--yellow)"></span> EMSC | <span class="live-dot" style="display:inline-block;width:8px;height:8px;background:var(--yellow)" id="backendTopDot"></span> Backend
+    <a href="#" id="langSwitch" onclick="switchLanguage();return false;" style="color:var(--blue);margin-left:8px;font-size:1.1em;text-decoration:none;cursor:pointer" title="English">EN</a></div>
   </div>
 </div>
 
 <div id="threatBanner" class="threat-green">
-  ESTADO: MONITOREANDO | Sin amenaza inmediata detectada
+  ESTADO: MONITOREO | Sin amenaza inmediata detectada
 </div>
 <div id="tsunamiBanner"></div>
 
@@ -270,46 +293,49 @@
     </div>
     <span class="event-panel-maximize" onclick="toggleMaximize()" title="Maximize/Restore">&#9634;</span>
     <div class="log-tabs">
-      <button class="log-tab active" id="tabEvents" onclick="switchLogTab('events')">EVENTS <span class="count" id="countEvents">(0)</span></button>
-      <button class="log-tab" id="tabWaveforms" onclick="switchLogTab('waveforms')">WAVEFORMS <span class="count" id="countWaveforms">(0)</span></button>
+      <button class="log-tab active" id="tabEvents" onclick="switchLogTab('events')"><span data-i18n="events">EVENTOS</span> <span class="count" id="countEvents">(0)</span></button>
+      <button class="log-tab" id="tabWaveforms" onclick="switchLogTab('waveforms')"><span data-i18n="waveforms">ONDAS</span> <span class="count" id="countWaveforms">(0)</span></button>
     </div>
     <div class="log-pane active event-log" id="logEvents"></div>
     <div class="log-pane event-log" id="logWaveforms"></div>
   </div>
 
-  <div class="sidebar">
-    <h2>IMPACTO EN CARACAS (BA08 + Basin x2)</h2>
+  <div class="sidebar collapsed" id="sidebarPanel">
+    <div class="sidebar-toggle" onclick="toggleSidebar()">
+      <span class="arrow" id="sidebarArrow">◀</span>
+    </div>
+    <h2 data-i18n="impactTitle">IMPACTO CARACAS (BA08 + Cuenca x2)</h2>
     <div class="caracas-panel">
-      <h3>Nivel de Amenaza Actual</h3>
-      <div class="row"><span>Último evento significativo:</span><span class="v" id="lastSigEvent">--</span></div>
-      <div class="row"><span>Hace:</span><span class="v" id="lastSigTime">--</span></div>
-      <div class="row"><span>PGA Est. Caracas (cuenca):</span><span class="v" id="lastSigPGA">--</span></div>
-      <div class="row"><span>MMI Est. Caracas:</span><span class="v" id="lastSigMMI">--</span></div>
-      <div class="row"><span>Llegada onda S:</span><span class="v" id="lastSigSwave">--</span></div>
+      <h3 data-i18n="threatLevel">Nivel de Amenaza Actual</h3>
+      <div class="row"><span data-i18n="lastSigLabel">Último evento significativo:</span><span class="v" id="lastSigEvent">--</span></div>
+      <div class="row"><span data-i18n="timeAgoLabel">Hace:</span><span class="v" id="lastSigTime">--</span></div>
+      <div class="row"><span data-i18n="estPga">PGA est. Caracas (cuenca):</span><span class="v" id="lastSigPGA">--</span></div>
+      <div class="row"><span data-i18n="estMmi">MMI est. Caracas:</span><span class="v" id="lastSigMMI">--</span></div>
+      <div class="row"><span data-i18n="swaveArrival">Llegada onda S:</span><span class="v" id="lastSigSwave">--</span></div>
     </div>
 
     <div class="stats">
-      <div class="stat" id="statTotal"><div class="val">0</div><div class="lbl">Eventos (24h, región)</div></div>
-      <div class="stat" id="statM4"><div class="val">0</div><div class="lbl">M4.0+ (24h)</div></div>
-      <div class="stat" id="statM5"><div class="val">0</div><div class="lbl">M5.0+ (24h)</div></div>
-      <div class="stat" id="statMax"><div class="val">--</div><div class="lbl">Mag. máx. (24h)</div></div>
+      <div class="stat" id="statTotal"><div class="val">0</div><div class="lbl" data-i18n="events24h">Eventos (24h, región)</div></div>
+      <div class="stat" id="statM4"><div class="val">0</div><div class="lbl" data-i18n="m4plus">M4.0+ (24h)</div></div>
+      <div class="stat" id="statM5"><div class="val">0</div><div class="lbl" data-i18n="m5plus">M5.0+ (24h)</div></div>
+      <div class="stat" id="statMax"><div class="val">--</div><div class="lbl" data-i18n="maxMag">Máx. mag (24h)</div></div>
     </div>
 
     <div class="seismogram-container">
-      <h3>SISMOGRAMAS EN VIVO — Todas las Estaciones SeedLink (BHZ)</h3>
+      <h3 data-i18n="seismograms">SISMOGRAMAS EN VIVO — Estaciones SeedLink (BHZ)</h3>
       <canvas id="seismogramCanvas"></canvas>
     </div>
 
     <div class="controls">
-      <button id="btnSound" class="active" onclick="toggleSound()">Sonido ON</button>
-      <button id="btnNotif" onclick="requestNotifications()">Activar Notificaciones</button>
-      <button onclick="fetchNow()">Actualizar</button>
-      <button onclick="testAlarm()">Probar Alarma</button>
+      <button id="btnSound" class="active" onclick="toggleSound()" data-i18n="soundOn">Sonido ON</button>
+      <button id="btnNotif" onclick="requestNotifications()" data-i18n="enableNotif">Habilitar Notificaciones</button>
+      <button onclick="fetchNow()" data-i18n="refreshNow">Actualizar</button>
+      <button onclick="testAlarm()" data-i18n="testAlarmBtn">Probar Alarma</button>
       <label style="display:flex;align-items:center;gap:4px;font-size:0.75em;color:#888;cursor:pointer;flex-basis:100%;margin-top:4px;">
-        <input type="checkbox" id="chkElevated" checked onchange="toggleElevated()"> Mostrar alertas ELEVADAS en registro
+        <input type="checkbox" id="chkElevated" checked onchange="toggleElevated()"> <span data-i18n="showElevated">Mostrar alertas ELEVADAS en registro</span>
       </label>
       <label style="display:flex;align-items:center;gap:4px;font-size:0.75em;color:#888;cursor:pointer;flex-basis:100%;">
-        <input type="checkbox" id="chkFelt" checked onchange="toggleFeltCircles()"> Mostrar círculos de radio percibido
+        <input type="checkbox" id="chkFelt" checked onchange="toggleFeltCircles()"> <span data-i18n="showFeltCircles">Mostrar círculos de radio sentido</span>
       </label>
     </div>
 
@@ -322,8 +348,8 @@
       </span>
     </div>
 
-    <div class="countdown">
-      Backend WS + USGS poll 15s + EMSC WebSocket | Region: lat 7-15, lon -75 to -59
+    <div class="countdown" id="footerInfo">
+      Backend WS + USGS sondeo 15s + EMSC WebSocket | Región: lat 7-15, lon -75 a -59
     </div>
   </div>
 </div>
@@ -353,6 +379,159 @@ const BA08 = {
 };
 const BASIN_AMP = 1.5; // Extra basin resonance beyond BA08 Vs30=270 response
 const BASIN_VS30 = 270;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// I18N — MULTILINGUAL SUPPORT
+// ═══════════════════════════════════════════════════════════════════════════
+
+let currentLang = 'es'; // default Spanish
+
+const I18N = {
+  en: {
+    title: 'CARACAS EARTHQUAKE MONITOR - LIVE',
+    header: 'CARACAS SEISMIC MONITOR',
+    connecting: 'CONNECTING...',
+    lastUsgs: 'Last USGS',
+    nextLabel: 'Next',
+    statusMonitoring: 'STATUS: MONITORING | No immediate threat detected',
+    events: 'EVENTS',
+    waveforms: 'WAVEFORMS',
+    impactTitle: 'CARACAS IMPACT (BA08 + Basin x2)',
+    threatLevel: 'Current Threat Level',
+    lastSigLabel: 'Last significant event:',
+    timeAgoLabel: 'Time ago:',
+    estPga: 'Est. PGA Caracas (basin):',
+    estMmi: 'Est. MMI Caracas:',
+    swaveArrival: 'S-wave arrival:',
+    events24h: 'Events (24h, region)',
+    m4plus: 'M4.0+ (24h)',
+    m5plus: 'M5.0+ (24h)',
+    maxMag: 'Max mag (24h)',
+    seismograms: 'LIVE SEISMOGRAMS — All SeedLink Stations (BHZ)',
+    soundOn: 'Sound ON', soundOff: 'Sound OFF',
+    enableNotif: 'Enable Notifications',
+    notifOn: 'Notif ON', notifOff: 'Notif OFF',
+    refreshNow: 'Refresh Now',
+    testAlarmBtn: 'Test Alarm',
+    showElevated: 'Show ELEVATED alerts in log',
+    showFeltCircles: 'Show felt radius circles',
+    offline: 'OFFLINE', connected: 'CONNECTED',
+    footerInfo: 'Backend WS + USGS poll 15s + EMSC WebSocket | Region: lat 7-15, lon -75 to -59',
+    alertCritical: 'ALERT: M{mag} - {place} - POTENTIAL STRONG SHAKING IN CARACAS',
+    alertHigh: 'WARNING: M{mag} - {place} - Moderate shaking possible in Caracas',
+    alertMedium: 'NOTICE: M{mag} - {place} - Light shaking possible in Caracas',
+    notifTitle: 'Earthquake M{mag} near Caracas',
+    testAlarmMsg: 'TEST ALARM - This is a test',
+    testComplete: 'STATUS: MONITORING | Test complete',
+    waitingSeedlink: 'Waiting for SeedLink data...',
+    monitorTarget: 'Your monitoring target',
+    severeZone: '200 km - Severe shaking zone',
+    moderateZone: '400 km - Moderate shaking zone',
+    sanSebastian: 'San Sebastian Fault',
+    seedlinkStation: 'SeedLink station',
+    felt: 'FELT', notFelt: 'not felt', micro: 'micro',
+    fromOrigin: 'from origin',
+    depth: 'Depth', distCaracas: 'Dist Caracas',
+    pgaBasin: 'PGA basin', radius: 'Radius',
+    stations: 'stations',
+    mmi: {1:'Not felt',2:'Weak',3:'Weak',4:'Light',5:'Moderate',6:'Strong',7:'Very Strong',8:'Severe',9:'Violent',10:'Extreme'},
+    rings: {8:'VIII Severe',7:'VII Very Strong',6:'VI Strong',5:'V Moderate',4:'IV Light',3:'III Weak',2:'II Barely felt'},
+    langSwitch: 'ES', langTitle: 'Español',
+    tsunamiBanner: 'TSUNAMI {severity}: {title} {region}',
+    tsunamiNotif: 'TSUNAMI ALERT — Possible coastal threat to Caracas. Seek high ground if near coast.',
+  },
+  es: {
+    title: 'MONITOR DE TERREMOTOS CARACAS - EN VIVO',
+    header: 'MONITOR SÍSMICO CARACAS',
+    connecting: 'CONECTANDO...',
+    lastUsgs: 'Últ. USGS',
+    nextLabel: 'Próx.',
+    statusMonitoring: 'ESTADO: MONITOREO | Sin amenaza inmediata detectada',
+    events: 'EVENTOS',
+    waveforms: 'ONDAS',
+    impactTitle: 'IMPACTO CARACAS (BA08 + Cuenca x2)',
+    threatLevel: 'Nivel de Amenaza Actual',
+    lastSigLabel: 'Último evento significativo:',
+    timeAgoLabel: 'Hace:',
+    estPga: 'PGA est. Caracas (cuenca):',
+    estMmi: 'MMI est. Caracas:',
+    swaveArrival: 'Llegada onda S:',
+    events24h: 'Eventos (24h, región)',
+    m4plus: 'M4.0+ (24h)',
+    m5plus: 'M5.0+ (24h)',
+    maxMag: 'Máx. mag (24h)',
+    seismograms: 'SISMOGRAMAS EN VIVO — Estaciones SeedLink (BHZ)',
+    soundOn: 'Sonido ON', soundOff: 'Sonido OFF',
+    enableNotif: 'Habilitar Notificaciones',
+    notifOn: 'Notif ON', notifOff: 'Notif OFF',
+    refreshNow: 'Actualizar',
+    testAlarmBtn: 'Probar Alarma',
+    showElevated: 'Mostrar alertas ELEVADAS en registro',
+    showFeltCircles: 'Mostrar círculos de radio sentido',
+    offline: 'DESCONECTADO', connected: 'CONECTADO',
+    footerInfo: 'Backend WS + USGS sondeo 15s + EMSC WebSocket | Región: lat 7-15, lon -75 a -59',
+    alertCritical: 'ALERTA: M{mag} - {place} - POTENCIAL SACUDIDA FUERTE EN CARACAS',
+    alertHigh: 'AVISO: M{mag} - {place} - Posible sacudida moderada en Caracas',
+    alertMedium: 'NOTA: M{mag} - {place} - Posible sacudida leve en Caracas',
+    notifTitle: 'Terremoto M{mag} cerca de Caracas',
+    testAlarmMsg: 'ALARMA DE PRUEBA - Esto es una prueba',
+    testComplete: 'ESTADO: MONITOREO | Prueba completa',
+    waitingSeedlink: 'Esperando datos SeedLink...',
+    monitorTarget: 'Su objetivo de monitoreo',
+    severeZone: '200 km - Zona de sacudida severa',
+    moderateZone: '400 km - Zona de sacudida moderada',
+    sanSebastian: 'Falla de San Sebastián',
+    seedlinkStation: 'Estación SeedLink',
+    felt: 'SENTIDO', notFelt: 'no sentido', micro: 'micro',
+    fromOrigin: 'desde el origen',
+    depth: 'Prof.', distCaracas: 'Dist Caracas',
+    pgaBasin: 'PGA cuenca', radius: 'Radio',
+    stations: 'estaciones',
+    mmi: {1:'No sentido',2:'Débil',3:'Débil',4:'Leve',5:'Moderado',6:'Fuerte',7:'Muy Fuerte',8:'Severo',9:'Violento',10:'Extremo'},
+    rings: {8:'VIII Severo',7:'VII Muy Fuerte',6:'VI Fuerte',5:'V Moderado',4:'IV Leve',3:'III Débil',2:'II Apenas sentido'},
+    langSwitch: 'EN', langTitle: 'English',
+    tsunamiBanner: 'TSUNAMI {severity}: {title} {region}',
+    tsunamiNotif: 'ALERTA TSUNAMI — Posible amenaza costera para Caracas. Busque terreno alto si está cerca de la costa.',
+  },
+};
+
+function t(key) { return (I18N[currentLang] || I18N.es)[key] || (I18N.en[key] || key); }
+
+function switchLanguage() {
+  currentLang = currentLang === 'es' ? 'en' : 'es';
+  applyLanguage();
+  // Refresh dynamic content
+  updateUI();
+  updateMap();
+}
+
+function applyLanguage() {
+  document.title = t('title');
+  // Static elements with data-i18n
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  // Update language switcher
+  const ls = document.getElementById('langSwitch');
+  if (ls) { ls.textContent = t('langSwitch'); ls.title = t('langTitle'); }
+  // Update buttons
+  const bs = document.getElementById('btnSound');
+  if (bs) bs.textContent = soundEnabled ? t('soundOn') : t('soundOff');
+  const bn = document.getElementById('btnNotif');
+  if (bn) bn.textContent = notifEnabled ? t('notifOn') : t('notifOff');
+  // Source status
+  updateSourceStatus();
+  // Backend status
+  updateBackendStatus();
+  // Threat banner (if green/monitoring)
+  const banner = document.getElementById('threatBanner');
+  if (banner && banner.className.includes('threat-green')) {
+    banner.innerHTML = t('statusMonitoring');
+  }
+  // Footer
+  const footer = document.getElementById('footerInfo');
+  if (footer) footer.textContent = t('footerInfo');
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
@@ -426,7 +605,8 @@ function pgaToMMI(gal) {
 }
 
 function mmiDesc(m) {
-  return {1:"No percibido",2:"Débil",3:"Débil",4:"Ligero",5:"Moderado",6:"Fuerte",7:"Muy Fuerte",8:"Severo",9:"Violento",10:"Extremo"}[Math.min(Math.max(Math.round(m),1),10)]||"Extreme";
+  const k = Math.min(Math.max(Math.round(m),1),10);
+  return (t('mmi') || {})[k] || I18N.en.mmi[k] || 'Extreme';
 }
 
 function haversine(lat1,lon1,lat2,lon2) {
@@ -447,14 +627,15 @@ function swaveSeconds(distKm, depthKm) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const MMI_RINGS = [
-  {mmi: 8, color: '#cc0000', label: 'VIII Severe'},
-  {mmi: 7, color: '#ee4400', label: 'VII Very Strong'},
-  {mmi: 6, color: '#ff8800', label: 'VI Strong'},
-  {mmi: 5, color: '#ffcc00', label: 'V Moderate'},
-  {mmi: 4, color: '#eeee44', label: 'IV Light'},
-  {mmi: 3, color: '#88ccff', label: 'III Weak'},
-  {mmi: 2, color: '#cceeFF', label: 'II Barely felt'},
+  {mmi: 8, color: '#cc0000'},
+  {mmi: 7, color: '#ee4400'},
+  {mmi: 6, color: '#ff8800'},
+  {mmi: 5, color: '#ffcc00'},
+  {mmi: 4, color: '#eeee44'},
+  {mmi: 3, color: '#88ccff'},
+  {mmi: 2, color: '#cceeFF'},
 ];
+function ringLabel(mmi) { return (t('rings') || {})[mmi] || I18N.en.rings[mmi] || ''; }
 
 let showFeltCircles = true;
 
@@ -476,7 +657,7 @@ function calculateFeltRadii(mag) {
       const pga = ba08_pga_generic(mag, mid);
       if (pgaToMMI(pga) >= level.mmi) lo = mid; else hi = mid;
     }
-    if (lo >= 1) radii.push({radiusKm: lo, mmi: level.mmi, color: level.color, label: level.label});
+    if (lo >= 1) radii.push({radiusKm: lo, mmi: level.mmi, color: level.color, label: ringLabel(level.mmi)});
   }
   return radii;
 }
@@ -551,36 +732,42 @@ function stopSiren() {
 }
 
 function alarmLevel(mag, distKm) {
-  if (mag >= 6.0 && distKm < 400) return 'critical';
-  if (mag >= 5.0 && distKm < 300) return 'high';
-  if (mag >= 4.5 && distKm < 300) return 'medium';
-  if (mag >= 4.0 && distKm < 500) return 'low';
-  if (mag >= 3.0 && distKm < 200) return 'info';
+  // Use predicted MMI at Caracas (via BA08 GMPE) for realistic thresholds
+  const rjb = Math.max(0.1, distKm);
+  const pga = ba08_pga_gal(mag, rjb, BASIN_VS30);
+  const mmi = pgaToMMI(pga.soil); // .soil already includes BASIN_AMP
+  if (mmi >= 6.0) return 'critical';  // Strong — damage to weak structures
+  if (mmi >= 5.0) return 'high';      // Moderate — felt by everyone
+  if (mmi >= 4.0) return 'medium';    // Light — noticeable indoors
+  if (mmi >= 3.0) return 'low';       // Weak — felt by some
+  if (mmi >= 2.0) return 'info';      // Barely perceptible
   return 'none';
 }
 
 function triggerAlarm(level, mag, place) {
   lastAlarmTime = Date.now();
+  const banner = document.getElementById('threatBanner');
+  const ms = mag.toFixed(1);
   switch(level) {
     case 'critical':
       alarmDurationMs = 30000;
       playSiren(8);
       playBeep(880, 0.3, 10, 'critical');
-      document.getElementById('threatBanner').className = 'threat-red';
-      document.getElementById('threatBanner').innerHTML = `ALERT: M${mag.toFixed(1)} - ${place} - POSIBLE SACUDIDA FUERTE EN CARACAS`;
+      banner.className = 'threat-red';
+      banner.innerHTML = t('alertCritical').replace('{mag}',ms).replace('{place}',place);
       break;
     case 'high':
       alarmDurationMs = 20000;
       playSiren(5);
       playBeep(660, 0.3, 6, 'high');
-      document.getElementById('threatBanner').className = 'threat-orange';
-      document.getElementById('threatBanner').innerHTML = `WARNING: M${mag.toFixed(1)} - ${place} - Sacudida moderada posible en Caracas`;
+      banner.className = 'threat-orange';
+      banner.innerHTML = t('alertHigh').replace('{mag}',ms).replace('{place}',place);
       break;
     case 'medium':
       alarmDurationMs = 15000;
       playBeep(440, 0.4, 3, 'medium');
-      document.getElementById('threatBanner').className = 'threat-yellow';
-      document.getElementById('threatBanner').innerHTML = `NOTICE: M${mag.toFixed(1)} - ${place} - Sacudida ligera posible en Caracas`;
+      banner.className = 'threat-yellow';
+      banner.innerHTML = t('alertMedium').replace('{mag}',ms).replace('{place}',place);
       break;
     case 'low':
       alarmDurationMs = 5000;
@@ -589,7 +776,7 @@ function triggerAlarm(level, mag, place) {
   }
 
   if (notifEnabled && level !== 'none' && level !== 'info') {
-    new Notification(`Sismo M${mag.toFixed(1)} cerca de Caracas`, {
+    new Notification(t('notifTitle').replace('{mag}',ms), {
       body: `${place}\nAlarm: ${level.toUpperCase()}`,
       icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔴</text></svg>',
       requireInteraction: level === 'critical',
@@ -601,10 +788,10 @@ function testAlarm() {
   playSiren(3);
   playBeep(880, 0.3, 3, 'critical');
   document.getElementById('threatBanner').className = 'threat-red';
-  document.getElementById('threatBanner').innerHTML = 'ALARMA DE PRUEBA - Esto es una prueba';
+  document.getElementById('threatBanner').innerHTML = t('testAlarmMsg');
   setTimeout(() => {
     document.getElementById('threatBanner').className = 'threat-green';
-    document.getElementById('threatBanner').innerHTML = 'ESTADO: MONITOREANDO | Prueba completada';
+    document.getElementById('threatBanner').innerHTML = t('testComplete');
   }, 5000);
 }
 
@@ -703,7 +890,7 @@ function updateSourceStatus() {
   const el = document.getElementById('sourceStatus');
   if (el) {
     const beColor = backendConnected ? 'var(--green)' : 'var(--red)';
-    const beText = backendConnected ? 'CONNECTED' : 'OFFLINE';
+    const beText = backendConnected ? t('connected') : t('offline');
     const emColor = emscConnected ? 'var(--green)' : 'var(--red)';
     const emText = emscConnected ? 'OK' : 'DOWN';
     el.innerHTML = `Backend: <span style="color:${beColor}">${beText}</span> | USGS 15s | EMSC: <span style="color:${emColor}">${emText}</span>`;
@@ -859,7 +1046,7 @@ function updateUI() {
     document.getElementById('lastSigTime').textContent = ago;
     document.getElementById('lastSigPGA').textContent = `${s.pga_basin.toFixed(1)} gal`;
     document.getElementById('lastSigMMI').textContent = `${s.mmi.toFixed(1)} (${s.mmiDesc})`;
-    document.getElementById('lastSigSwave').textContent = `~${s.swave}s from origin`;
+    document.getElementById('lastSigSwave').textContent = `~${s.swave}s ${t('fromOrigin')}`;
 
     document.getElementById('lastSigPGA').style.color =
       s.pga_basin > 50 ? 'var(--red)' : s.pga_basin > 20 ? 'var(--orange)' : s.pga_basin > 5 ? 'var(--yellow)' : 'var(--green)';
@@ -895,7 +1082,7 @@ function updateUI() {
     const banner = document.getElementById('threatBanner');
     if (!banner.className.includes('threat-green')) {
       banner.className = 'threat-green';
-      banner.innerHTML = 'ESTADO: MONITOREANDO | Sin amenaza inmediata detectada';
+      banner.innerHTML = t('statusMonitoring');
     }
   }
 }
@@ -908,10 +1095,11 @@ function setStatVal(id, val, cls) {
 
 function timeSince(epochMs) {
   const s = Math.floor((Date.now() - epochMs) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s/60)}m ago`;
-  if (s < 86400) return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ago`;
-  return `${Math.floor(s/86400)}d ago`;
+  const isEs = currentLang === 'es';
+  if (s < 60) return isEs ? `hace ${s}s` : `${s}s ago`;
+  if (s < 3600) return isEs ? `hace ${Math.floor(s/60)}m` : `${Math.floor(s/60)}m ago`;
+  if (s < 86400) { const h=Math.floor(s/3600), m=Math.floor((s%3600)/60); return isEs ? `hace ${h}h ${m}m` : `${h}h ${m}m ago`; }
+  return isEs ? `hace ${Math.floor(s/86400)}d` : `${Math.floor(s/86400)}d ago`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -928,21 +1116,21 @@ function initMap() {
   // Caracas marker (permanent)
   caracasMarker = L.circleMarker([CARACAS.lat, CARACAS.lon], {
     radius: 8, color: '#00ff88', fillColor: '#00ff88', fillOpacity: 0.9, weight: 2
-  }).addTo(map).bindPopup('<strong>CARACAS</strong><br>Su objetivo de monitoreo');
+  }).addTo(map).bindPopup(`<strong>CARACAS</strong><br>${t('monitorTarget')}`);
 
   // Alert radius circles
   L.circle([CARACAS.lat, CARACAS.lon], {
     radius: 200000, color: '#ff2222', fillOpacity: 0, weight: 1, dashArray: '6,4', opacity: 0.3
-  }).addTo(map).bindPopup('200 km - Zona de sacudida severa');
+  }).addTo(map).bindPopup(t('severeZone'));
 
   L.circle([CARACAS.lat, CARACAS.lon], {
     radius: 400000, color: '#ff8800', fillOpacity: 0, weight: 1, dashArray: '6,4', opacity: 0.2
-  }).addTo(map).bindPopup('400 km - Zona de sacudida moderada');
+  }).addTo(map).bindPopup(t('moderateZone'));
 
-  // Falla de San Sebastián
+  // San Sebastian Fault
   L.polyline([
     [10.5,-69.5],[10.48,-68.5],[10.5,-67.5],[10.5,-66.9],[10.5,-66],[10.5,-65]
-  ], { color: '#ff6600', weight: 2, opacity: 0.6 }).addTo(map).bindPopup('Falla de San Sebastián');
+  ], { color: '#ff6600', weight: 2, opacity: 0.6 }).addTo(map).bindPopup(t('sanSebastian'));
 
   // SeedLink station markers (triangles via divIcon)
   const stations = [
@@ -959,7 +1147,7 @@ function initMap() {
       iconSize:[14,14], iconAnchor:[7,13],
     });
     L.marker([s.lat, s.lon], { icon }).addTo(map)
-      .bindPopup(`<strong>${s.id}</strong><br>${s.name}<br>SeedLink station`);
+      .bindPopup(`<strong>${s.id}</strong><br>${s.name}<br>${t('seedlinkStation')}`);
   });
 }
 
@@ -1002,8 +1190,8 @@ function updateMap() {
       `<strong>M${e.mag.toFixed(1)}</strong><br>${e.place}<br>` +
       `<span style="color:#888">${new Date(e.time).toISOString().replace('T',' ').slice(0,19)} UTC</span><br>` +
       `${timeSince(e.time)}<br>` +
-      `Profundidad: ${e.depth} km | Dist. Caracas: ${e.distKm} km<br>` +
-      `PGA cuenca: ${e.pga_basin.toFixed(1)} gal | MMI: ${e.mmi.toFixed(0)} (${e.mmiDesc})`
+      `${t('depth')}: ${e.depth} km | ${t('distCaracas')}: ${e.distKm} km<br>` +
+      `${t('pgaBasin')}: ${e.pga_basin.toFixed(1)} gal | MMI: ${e.mmi.toFixed(0)} (${e.mmiDesc})`
     );
     eventMarkers.push(marker);
 
@@ -1054,7 +1242,7 @@ function updateMap() {
               dashArray: fr.mmi <= 3 ? '4 4' : null,
             }).addTo(map).bindPopup(
               `<strong>M${e.mag.toFixed(1)}</strong> — ${fr.label}<br>` +
-              `Radius: ${Math.round(fr.radiusKm)} km<br>` +
+              `${t('radius')}: ${Math.round(fr.radiusKm)} km<br>` +
               `<span style="color:#888">${e.place}</span>`
             );
             eventMarkers.push(fc);
@@ -1139,7 +1327,7 @@ function animateGhostRings() {
 function toggleSound() {
   soundEnabled = !soundEnabled;
   const btn = document.getElementById('btnSound');
-  btn.textContent = soundEnabled ? 'Sonido ON' : 'Sonido OFF';
+  btn.textContent = soundEnabled ? t('soundOn') : t('soundOff');
   btn.className = soundEnabled ? 'active' : '';
 }
 
@@ -1147,7 +1335,7 @@ function requestNotifications() {
   if ('Notification' in window) {
     Notification.requestPermission().then(p => {
       notifEnabled = p === 'granted';
-      document.getElementById('btnNotif').textContent = notifEnabled ? 'Notif ON' : 'Notif OFF';
+      document.getElementById('btnNotif').textContent = notifEnabled ? t('notifOn') : t('notifOff');
       document.getElementById('btnNotif').className = notifEnabled ? 'active' : '';
     });
   }
@@ -1161,7 +1349,14 @@ function fetchNow() {
 function toggleEventPanel() {
   const panel = document.getElementById('eventPanel');
   panel.classList.toggle('collapsed');
-  // Invalidate map size after transition
+  setTimeout(() => { if (map) map.invalidateSize(); }, 350);
+}
+
+function toggleSidebar() {
+  const panel = document.getElementById('sidebarPanel');
+  panel.classList.toggle('collapsed');
+  const arrow = document.getElementById('sidebarArrow');
+  if (arrow) arrow.textContent = panel.classList.contains('collapsed') ? '◀' : '▶';
   setTimeout(() => { if (map) map.invalidateSize(); }, 350);
 }
 
@@ -1201,14 +1396,14 @@ function buildEventItem(e) {
                    src.includes('emsc') || src.includes('EMSC') ? 'source-emsc' : 'source-usgs';
   const srcLabel = src.includes('seedlink') ? 'SeedLink' :
                    src.includes('+') ? src : src || 'USGS';
-  const feltStr = e.feltReports ? ` | Felt: ${e.feltReports} reports` : '';
+  const feltStr = e.feltReports ? ` | ${t('felt')}: ${e.feltReports}` : '';
   const utcTime = new Date(e.time).toISOString().replace('T',' ').slice(0,19) + ' UTC';
 
   // Felt indicator based on MMI
   const isFelt = (e.mmi || 0) >= 2.0;
   const feltBadge = isFelt
-    ? '<span class="felt-badge felt-yes">FELT</span>'
-    : '<span class="felt-badge felt-no">not felt</span>';
+    ? `<span class="felt-badge felt-yes">${t('felt')}</span>`
+    : `<span class="felt-badge felt-no">${t('notFelt')}</span>`;
 
   div.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -1232,13 +1427,13 @@ function buildWaveformItem(e) {
   const ago = timeSince(e.time);
   const utcTime = new Date(e.time).toISOString().replace('T',' ').slice(0,19) + ' UTC';
   const coinStr = e.coincidenceStations?.length > 1
-    ? ` | ${e.coincidenceStations.length} stations` : '';
+    ? ` | ${e.coincidenceStations.length} ${t('stations')}` : '';
 
   // Estimate if felt: CFT >= 3.0 typically corresponds to felt earthquake
   const isFelt = (e.cft || 0) >= 3.0;
   const feltBadge = isFelt
-    ? '<span class="felt-badge felt-yes">FELT</span>'
-    : '<span class="felt-badge felt-no">micro</span>';
+    ? `<span class="felt-badge felt-yes">${t('felt')}</span>`
+    : `<span class="felt-badge felt-no">${t('micro')}</span>`;
 
   div.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -1442,40 +1637,159 @@ function handleTestimonies(msg) {
 
 let tsunamiLayers = [];
 
+// Caribbean coastal zones — polylines + labels for tsunami threat mapping
+const TSUNAMI_COAST_ZONES = [
+  { name:'Venezuela W', label:'Falcón–Zulia',
+    coast:[[12.2,-72.2],[11.95,-71.6],[11.8,-71.0],[11.5,-70.5],[11.0,-70.0],[10.8,-69.5],[10.7,-69.0]],
+    labelPos:[11.3,-70.5] },
+  { name:'Venezuela C', label:'Carabobo–Vargas–Caracas',
+    coast:[[10.7,-69.0],[10.6,-68.5],[10.55,-68.0],[10.5,-67.5],[10.5,-67.0],[10.55,-66.9],[10.6,-66.5],[10.65,-66.1]],
+    labelPos:[10.85,-67.5] },
+  { name:'Venezuela E', label:'Miranda–Sucre–N.Esparta',
+    coast:[[10.65,-66.1],[10.7,-65.5],[10.75,-65.0],[10.7,-64.5],[10.65,-64.0],[10.6,-63.5],[10.5,-63.0],[10.6,-62.5],[10.7,-62.0]],
+    labelPos:[10.95,-64.0] },
+  { name:'Venezuela Delta', label:'Delta Amacuro–Trinidad',
+    coast:[[10.7,-62.0],[10.3,-61.5],[10.1,-61.0],[10.0,-61.9],[10.65,-61.5]],
+    labelPos:[10.3,-61.5] },
+  { name:'Trinidad', label:'Trinidad & Tobago',
+    coast:[[10.8,-61.9],[10.7,-61.5],[10.05,-61.0],[10.0,-61.9],[10.3,-61.95],[10.65,-61.95],[10.8,-61.9]],
+    labelPos:[10.4,-61.4] },
+  { name:'ABC Islands', label:'Aruba–Curaçao–Bonaire',
+    coast:[[12.5,-70.05],[12.2,-68.98],[12.15,-68.27]],
+    labelPos:[12.5,-69.5] },
+  { name:'Colombia', label:'Colombia N Coast',
+    coast:[[12.5,-72.2],[12.0,-73.0],[11.5,-73.5],[11.25,-74.2],[11.0,-74.8],[10.4,-75.5],[9.5,-76.0]],
+    labelPos:[11.5,-74.0] },
+  { name:'Windward', label:'Windward Islands',
+    coast:[[12.0,-61.7],[12.6,-61.2],[13.15,-61.2],[13.25,-59.6],[13.1,-59.5]],
+    labelPos:[12.8,-60.5] },
+  { name:'Leeward', label:'Leeward Islands',
+    coast:[[14.5,-61.0],[15.5,-61.5],[16.3,-61.8],[17.1,-61.8],[17.7,-62.9],[18.0,-63.1]],
+    labelPos:[16.0,-62.0] },
+  { name:'Puerto Rico', label:'Puerto Rico–USVI',
+    coast:[[18.5,-67.2],[18.45,-66.1],[18.35,-65.6],[18.3,-65.0],[18.35,-64.8]],
+    labelPos:[18.7,-66.0] },
+  { name:'Hispaniola S', label:'Dominican Rep.–Haiti S',
+    coast:[[18.2,-68.5],[18.0,-69.5],[18.2,-70.5],[18.6,-72.0],[18.5,-73.0],[18.2,-73.8],[18.2,-74.5]],
+    labelPos:[18.0,-71.0] },
+  { name:'Jamaica', label:'Jamaica',
+    coast:[[18.5,-76.2],[18.5,-77.8],[18.1,-78.3],[17.7,-77.3],[17.9,-76.2],[18.2,-76.2],[18.5,-76.2]],
+    labelPos:[18.3,-77.0] },
+];
+
+function tsunamiThreatLevel(epicLat, epicLon, mag, depth, zoneLabelPos) {
+  // Calculate threat level for a coastal zone based on distance, magnitude, depth
+  const dist = haversine(epicLat, epicLon, zoneLabelPos[0], zoneLabelPos[1]);
+  // Strike-slip earthquakes produce minimal tsunamis — check mechanism
+  // For simplicity: shallow (<50km) + high mag + near coast = threat
+  if (depth > 70 || mag < 6.5) return 'none';
+  if (mag >= 8.0) {
+    if (dist < 300) return 'warning';
+    if (dist < 800) return 'watch';
+    if (dist < 2000) return 'advisory';
+    return 'information';
+  }
+  if (mag >= 7.5) {
+    if (dist < 200) return 'warning';
+    if (dist < 500) return 'watch';
+    if (dist < 1000) return 'advisory';
+    return 'information';
+  }
+  if (mag >= 7.0) {
+    if (dist < 150) return 'watch';
+    if (dist < 400) return 'advisory';
+    return 'information';
+  }
+  // M 6.5-7.0
+  if (dist < 100) return 'advisory';
+  if (dist < 300) return 'information';
+  return 'none';
+}
+
+const TSUNAMI_COLORS = {
+  warning:     {stroke:'#ff2222', fill:'#ff2222', fillOp:0.18, label:'WARNING (>3m)'},
+  watch:       {stroke:'#ff8800', fill:'#ff8800', fillOp:0.12, label:'WATCH (1-3m)'},
+  advisory:    {stroke:'#ffcc00', fill:'#ffcc00', fillOp:0.08, label:'ADVISORY (0.3-1m)'},
+  information: {stroke:'#44aaff', fill:'#44aaff', fillOp:0.05, label:'INFO (<0.3m)'},
+};
+
+function drawTsunamiZones(epicLat, epicLon, mag, depth) {
+  clearTsunamiLayers();
+  if (!map) return;
+
+  TSUNAMI_COAST_ZONES.forEach(zone => {
+    const level = tsunamiThreatLevel(epicLat, epicLon, mag, depth, zone.labelPos);
+    if (level === 'none') return;
+    const c = TSUNAMI_COLORS[level];
+
+    // Draw coastline with threat color
+    const poly = L.polyline(zone.coast, {
+      color: c.stroke, weight: level === 'warning' ? 5 : level === 'watch' ? 4 : 3,
+      opacity: 0.85, dashArray: level === 'information' ? '6 4' : null,
+    }).addTo(map);
+    tsunamiLayers.push(poly);
+
+    // Coastal buffer (30km strip)
+    zone.coast.forEach(([lat,lon]) => {
+      const buf = L.circle([lat, lon], {
+        radius: 30000, color: c.stroke, fillColor: c.fill,
+        fillOpacity: c.fillOp, weight: 0, opacity: 0,
+      }).addTo(map);
+      tsunamiLayers.push(buf);
+    });
+
+    // Zone label
+    const icon = L.divIcon({
+      className: 'tsunami-label',
+      html: `<span style="color:${c.stroke};font-size:11px;font-weight:700;font-family:monospace;text-shadow:0 0 4px #000,0 0 8px #000;white-space:nowrap;padding:2px 4px;background:rgba(0,0,0,0.6);border:1px solid ${c.stroke};border-radius:3px;">${zone.label}: ${level.toUpperCase()}</span>`,
+      iconSize: [160, 20], iconAnchor: [80, 10],
+    });
+    const lbl = L.marker(zone.labelPos, { icon, interactive: false }).addTo(map);
+    tsunamiLayers.push(lbl);
+  });
+}
+
 function handleTsunamiAlert(msg) {
   const banner = document.getElementById('tsunamiBanner');
   if (!banner) return;
 
   if (msg.active && msg.alert) {
     const a = msg.alert;
-    const severityColor = {warning:'#ff4444', watch:'#ffaa00', advisory:'#ffcc00', information:'#44aaff'}[a.severity] || '#44aaff';
+    const sevColor = {warning:'#ff4444', watch:'#ffaa00', advisory:'#ffcc00', information:'#44aaff'}[a.severity] || '#44aaff';
     banner.className = 'active';
-    banner.style.color = severityColor;
-    banner.style.borderColor = severityColor;
-    banner.innerHTML = `TSUNAMI ${a.severity.toUpperCase()}: ${a.title} ${a.region ? '— ' + a.region : ''} <span style="font-size:0.8em;color:#888">(Source: ${a.source})</span>`;
+    banner.style.color = sevColor;
+    banner.style.borderColor = sevColor;
+    banner.innerHTML = `TSUNAMI ${a.severity.toUpperCase()}: ${a.title} ${a.region ? '— ' + a.region : ''} <span style="font-size:0.8em;color:#888">(${a.source})</span>`;
 
-    // Draw tsunami threat zone on map — coastal strip along Venezuela
-    clearTsunamiLayers();
-    if (map) {
-      // Venezuela/Caribbean coastline threat zones
-      const coastZones = [
-        // Venezuela north coast
-        [[12.0,-71.0],[11.8,-70.5],[11.5,-70.0],[11.0,-69.5],[10.8,-69.0],[10.7,-68.0],[10.6,-67.5],[10.5,-67.0],[10.6,-66.5],[10.7,-66.0],[10.8,-65.5],[10.8,-65.0],[10.7,-64.5],[10.6,-64.0],[10.5,-63.5],[10.5,-63.0],[10.6,-62.5]],
-      ];
-      coastZones.forEach(zone => {
-        const poly = L.polyline(zone, {
-          color: severityColor, weight: 4, opacity: 0.7, dashArray: '8 4',
-        }).addTo(map);
-        tsunamiLayers.push(poly);
-        // 30km coastal buffer
-        zone.forEach(([lat,lon]) => {
-          const c = L.circle([lat, lon], {
-            radius: 30000, color: severityColor, fillColor: severityColor,
-            fillOpacity: 0.08, weight: 0, opacity: 0,
-          }).addTo(map);
-          tsunamiLayers.push(c);
+    // Find the earthquake that triggered the tsunami alert and draw zones
+    let epicLat, epicLon, epicMag, epicDepth;
+    const triggerEvent = allEvents.find(e => e.mag >= 6.5 && e.source !== 'seedlink');
+    if (triggerEvent) {
+      epicLat = triggerEvent.lat; epicLon = triggerEvent.lon;
+      epicMag = triggerEvent.mag; epicDepth = triggerEvent.depth;
+    } else if (a.epicenter) {
+      epicLat = a.epicenter.lat; epicLon = a.epicenter.lon;
+      epicMag = a.epicenter.mag || 7.5; epicDepth = a.epicenter.depth || 10;
+    }
+
+    if (epicLat !== undefined) {
+      drawTsunamiZones(epicLat, epicLon, epicMag, epicDepth);
+
+      // Check threat specifically for Caracas coast (Venezuela C zone)
+      const caracasThreat = tsunamiThreatLevel(epicLat, epicLon, epicMag, epicDepth, [10.85, -67.5]);
+      if (caracasThreat !== 'none' && notifEnabled) {
+        new Notification('TSUNAMI — CARACAS', {
+          body: t('tsunamiNotif'),
+          icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🌊</text></svg>',
+          requireInteraction: true,
         });
-      });
+      }
+      // Play tsunami audio alert for Caracas-relevant threats
+      if (caracasThreat === 'warning' || caracasThreat === 'watch') {
+        playSiren(10);
+      } else if (caracasThreat === 'advisory') {
+        playBeep(550, 0.5, 4, 'high');
+      }
     }
   } else {
     banner.className = '';
@@ -1510,7 +1824,7 @@ function updateBackendStatus() {
   const dot = document.getElementById('backendDot');
   const label = document.getElementById('backendLabel');
   if (dot) dot.style.background = backendConnected ? 'var(--green)' : 'var(--red)';
-  if (label) label.textContent = backendConnected ? 'CONNECTED' : 'OFFLINE';
+  if (label) label.textContent = backendConnected ? t('connected') : t('offline');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1557,7 +1871,7 @@ function drawSeismogram() {
   if (n === 0) {
     ctx.fillStyle = '#555';
     ctx.font = `${14*dpr}px monospace`;
-    ctx.fillText('Waiting for SeedLink data...', 10*dpr, h/2);
+    ctx.fillText(t('waitingSeedlink'), 10*dpr, h/2);
     return;
   }
 
@@ -1645,6 +1959,11 @@ function drawSeismogram() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 document.addEventListener('DOMContentLoaded', () => {
+  // On desktop, sidebar starts open; on mobile it starts collapsed
+  if (window.innerWidth > 800) {
+    document.getElementById('sidebarPanel').classList.remove('collapsed');
+  }
+
   initMap();
   fetchData();
 
