@@ -262,6 +262,48 @@
   .caracas-panel h3 { font-size:0.8em; color:#00ff88; margin-bottom:6px; }
   .caracas-panel .row { display:flex; justify-content:space-between; font-size:0.78em; padding:2px 0; }
   .caracas-panel .row .v { font-weight:600; }
+
+  /* Station Manager Panel */
+  .station-mgr {
+    border-top:1px solid var(--border);
+  }
+  .station-mgr-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:6px 10px; cursor:pointer; user-select:none;
+    background:rgba(255,255,255,0.02);
+  }
+  .station-mgr-header:hover { background:rgba(255,255,255,0.04); }
+  .station-mgr-header h3 { font-size:0.75em; color:var(--blue); margin:0; }
+  .station-mgr-header .arrow { font-size:0.7em; color:#666; transition:transform 0.2s; }
+  .station-mgr-header.collapsed .arrow { transform:rotate(-90deg); }
+  .station-mgr-body { max-height:300px; overflow-y:auto; display:block; }
+  .station-mgr-body.collapsed { display:none; }
+  .station-sort-bar {
+    display:flex; gap:2px; padding:3px 6px; border-bottom:1px solid var(--border);
+    background:rgba(0,0,0,0.2); position:sticky; top:0; z-index:1;
+  }
+  .station-sort-bar button {
+    flex:1; padding:2px 3px; border:1px solid var(--border); border-radius:3px;
+    background:transparent; color:#888; cursor:pointer; font-size:0.6em; font-weight:600;
+  }
+  .station-sort-bar button:hover { color:#ccc; background:rgba(255,255,255,0.05); }
+  .station-sort-bar button.active { color:var(--blue); border-color:var(--blue); }
+  .station-row {
+    display:flex; align-items:center; gap:4px; padding:2px 8px; font-size:0.68em;
+    border-bottom:1px solid rgba(30,34,48,0.5); cursor:default;
+  }
+  .station-row:hover { background:rgba(255,255,255,0.03); }
+  .station-row input[type=checkbox] { width:12px; height:12px; flex-shrink:0; cursor:pointer; }
+  .station-row .sid { font-weight:600; width:60px; flex-shrink:0; font-family:monospace; }
+  .station-row .sname { flex:1; color:#999; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .station-row .sdist { width:48px; text-align:right; color:#777; flex-shrink:0; }
+  .station-row .scft { width:40px; text-align:right; flex-shrink:0; font-family:monospace; font-weight:600; }
+  .station-row.alarming { background:rgba(255,136,0,0.08); }
+  .station-row.offline .sid { opacity:0.4; }
+  .station-row.offline .sname { opacity:0.4; }
+
+  .event-item { cursor:pointer; }
+  .event-item:hover { background:rgba(68,170,255,0.08) !important; }
 </style>
 </head>
 <body>
@@ -326,6 +368,24 @@
       <canvas id="seismogramCanvas"></canvas>
     </div>
 
+    <!-- Station Manager -->
+    <div class="station-mgr" id="stationMgr">
+      <div class="station-mgr-header" id="stationMgrHeader" onclick="toggleStationMgr()">
+        <h3><span data-i18n="stationMgrTitle">ESTACIONES SEEDLINK</span> (<span id="stationActiveCount">0</span>/<span id="stationTotalCount">0</span>)</h3>
+        <span class="arrow">&#9660;</span>
+      </div>
+      <div class="station-mgr-body collapsed" id="stationMgrBody">
+        <div class="station-sort-bar">
+          <button class="active" onclick="sortStations('dist',this)" data-i18n="sortDist">Dist</button>
+          <button onclick="sortStations('id',this)" data-i18n="sortCode">Cod.</button>
+          <button onclick="sortStations('name',this)" data-i18n="sortCity">Ciudad</button>
+          <button onclick="sortStations('lat',this)" data-i18n="sortLat">Lat</button>
+          <button onclick="sortStations('lon',this)" data-i18n="sortLon">Lon</button>
+        </div>
+        <div id="stationList"></div>
+      </div>
+    </div>
+
     <div class="controls">
       <button id="btnSound" class="active" onclick="toggleSound()" data-i18n="soundOn">Sonido ON</button>
       <button id="btnNotif" onclick="requestNotifications()" data-i18n="enableNotif">Habilitar Notificaciones</button>
@@ -336,6 +396,9 @@
       </label>
       <label style="display:flex;align-items:center;gap:4px;font-size:0.75em;color:#888;cursor:pointer;flex-basis:100%;">
         <input type="checkbox" id="chkFelt" checked onchange="toggleFeltCircles()"> <span data-i18n="showFeltCircles">Mostrar círculos de radio sentido</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.75em;color:#888;cursor:pointer;flex-basis:100%;">
+        <input type="checkbox" id="chkFaults" checked onchange="toggleFaults()"> <span data-i18n="showFaults">Mostrar fallas y límite de placa</span>
       </label>
     </div>
 
@@ -415,11 +478,14 @@ const I18N = {
     testAlarmBtn: 'Test Alarm',
     showElevated: 'Show ELEVATED alerts in log',
     showFeltCircles: 'Show felt radius circles',
+    showFaults: 'Show faults & plate boundary',
     offline: 'OFFLINE', connected: 'CONNECTED',
     footerInfo: 'Backend WS + USGS poll 15s + EMSC WebSocket | Region: lat 7-15, lon -75 to -59',
     alertCritical: 'ALERT: M{mag} - {place} - POTENTIAL STRONG SHAKING IN CARACAS',
     alertHigh: 'WARNING: M{mag} - {place} - Moderate shaking possible in Caracas',
     alertMedium: 'NOTICE: M{mag} - {place} - Light shaking possible in Caracas',
+    alertConfirmed: 'CONFIRMED',
+    alertUnconfirmed: 'UNCONFIRMED',
     notifTitle: 'Earthquake M{mag} near Caracas',
     testAlarmMsg: 'TEST ALARM - This is a test',
     testComplete: 'STATUS: MONITORING | Test complete',
@@ -427,7 +493,7 @@ const I18N = {
     monitorTarget: 'Your monitoring target',
     severeZone: '200 km - Severe shaking zone',
     moderateZone: '400 km - Moderate shaking zone',
-    sanSebastian: 'San Sebastian Fault',
+    sanSebastian: 'San Sebastian Fault (click faults on map for details)',
     seedlinkStation: 'SeedLink station',
     felt: 'FELT', notFelt: 'not felt', micro: 'micro',
     fromOrigin: 'from origin',
@@ -436,6 +502,9 @@ const I18N = {
     stations: 'stations',
     mmi: {1:'Not felt',2:'Weak',3:'Weak',4:'Light',5:'Moderate',6:'Strong',7:'Very Strong',8:'Severe',9:'Violent',10:'Extreme'},
     rings: {8:'VIII Severe',7:'VII Very Strong',6:'VI Strong',5:'V Moderate',4:'IV Light',3:'III Weak',2:'II Barely felt'},
+    stationMgrTitle: 'SEEDLINK STATIONS',
+    sortDist: 'Dist', sortCode: 'Code', sortCity: 'City', sortLat: 'Lat', sortLon: 'Lon',
+    stationOnline: 'Online', stationOffline: 'Offline',
     langSwitch: 'ES', langTitle: 'Español',
     tsunamiBanner: 'TSUNAMI {severity}: {title} {region}',
     tsunamiNotif: 'TSUNAMI ALERT — Possible coastal threat to Caracas. Seek high ground if near coast.',
@@ -468,11 +537,14 @@ const I18N = {
     testAlarmBtn: 'Probar Alarma',
     showElevated: 'Mostrar alertas ELEVADAS en registro',
     showFeltCircles: 'Mostrar círculos de radio sentido',
+    showFaults: 'Mostrar fallas y límite de placa',
     offline: 'DESCONECTADO', connected: 'CONECTADO',
     footerInfo: 'Backend WS + USGS sondeo 15s + EMSC WebSocket | Región: lat 7-15, lon -75 a -59',
     alertCritical: 'ALERTA: M{mag} - {place} - POTENCIAL SACUDIDA FUERTE EN CARACAS',
     alertHigh: 'AVISO: M{mag} - {place} - Posible sacudida moderada en Caracas',
     alertMedium: 'NOTA: M{mag} - {place} - Posible sacudida leve en Caracas',
+    alertConfirmed: 'CONFIRMADO',
+    alertUnconfirmed: 'SIN CONFIRMAR',
     notifTitle: 'Terremoto M{mag} cerca de Caracas',
     testAlarmMsg: 'ALARMA DE PRUEBA - Esto es una prueba',
     testComplete: 'ESTADO: MONITOREO | Prueba completa',
@@ -489,6 +561,9 @@ const I18N = {
     stations: 'estaciones',
     mmi: {1:'No sentido',2:'Débil',3:'Débil',4:'Leve',5:'Moderado',6:'Fuerte',7:'Muy Fuerte',8:'Severo',9:'Violento',10:'Extremo'},
     rings: {8:'VIII Severo',7:'VII Muy Fuerte',6:'VI Fuerte',5:'V Moderado',4:'IV Leve',3:'III Débil',2:'II Apenas sentido'},
+    stationMgrTitle: 'ESTACIONES SEEDLINK',
+    sortDist: 'Dist', sortCode: 'Cod.', sortCity: 'Ciudad', sortLat: 'Lat', sortLon: 'Lon',
+    stationOnline: 'En linea', stationOffline: 'Sin datos',
     langSwitch: 'EN', langTitle: 'English',
     tsunamiBanner: 'TSUNAMI {severity}: {title} {region}',
     tsunamiNotif: 'ALERTA TSUNAMI — Posible amenaza costera para Caracas. Busque terreno alto si está cerca de la costa.',
@@ -559,6 +634,7 @@ let showElevated = true;
 let sirenInterval = null;
 let lastAlarmTime = 0; // timestamp of last alarm trigger
 let alarmDurationMs = 0; // how long the current alarm lasts
+let selectedEventId = null; // event whose isoseismals are force-shown on click
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BA08 GMPE
@@ -744,34 +820,40 @@ function alarmLevel(mag, distKm) {
   return 'none';
 }
 
-function triggerAlarm(level, mag, place) {
+function triggerAlarm(level, mag, place, confirmed) {
   lastAlarmTime = Date.now();
   const banner = document.getElementById('threatBanner');
   const ms = mag.toFixed(1);
+  const confirmTag = confirmed ? t('alertConfirmed') : t('alertUnconfirmed');
+
+  // Banner color: red for confirmed, yellow for unconfirmed
+  // Sound intensity still based on severity level
   switch(level) {
     case 'critical':
       alarmDurationMs = 30000;
       playSiren(8);
       playBeep(880, 0.3, 10, 'critical');
-      banner.className = 'threat-red';
-      banner.innerHTML = t('alertCritical').replace('{mag}',ms).replace('{place}',place);
+      banner.className = confirmed ? 'threat-red' : 'threat-yellow';
+      banner.innerHTML = `[${confirmTag}] ` + t('alertCritical').replace('{mag}',ms).replace('{place}',place);
       break;
     case 'high':
       alarmDurationMs = 20000;
       playSiren(5);
       playBeep(660, 0.3, 6, 'high');
-      banner.className = 'threat-orange';
-      banner.innerHTML = t('alertHigh').replace('{mag}',ms).replace('{place}',place);
+      banner.className = confirmed ? 'threat-red' : 'threat-yellow';
+      banner.innerHTML = `[${confirmTag}] ` + t('alertHigh').replace('{mag}',ms).replace('{place}',place);
       break;
     case 'medium':
       alarmDurationMs = 15000;
       playBeep(440, 0.4, 3, 'medium');
-      banner.className = 'threat-yellow';
-      banner.innerHTML = t('alertMedium').replace('{mag}',ms).replace('{place}',place);
+      banner.className = confirmed ? 'threat-red' : 'threat-yellow';
+      banner.innerHTML = `[${confirmTag}] ` + t('alertMedium').replace('{mag}',ms).replace('{place}',place);
       break;
     case 'low':
       alarmDurationMs = 5000;
       playBeep(330, 0.5, 1, 'low');
+      banner.className = confirmed ? 'threat-red' : 'threat-yellow';
+      banner.innerHTML = `[${confirmTag}] ` + t('alertMedium').replace('{mag}',ms).replace('{place}',place);
       break;
   }
 
@@ -857,7 +939,7 @@ function connectEMSC() {
             // Only alarm for fresh events (< 5 min old)
             const emscAge = Date.now() - time;
             if (level !== 'none' && emscAge < 300000) {
-              triggerAlarm(level, mag, `[EMSC LIVE] ${place}`);
+              triggerAlarm(level, mag, `[EMSC LIVE] ${place}`, true);
             }
 
             updateUI();
@@ -1002,7 +1084,7 @@ async function fetchData() {
     for (const evt of newEvents.sort((a,b) => b.mag - a.mag)) {
       const evtAge = Date.now() - evt.time;
       if (evt.level !== 'none' && evtAge < 300000) {
-        triggerAlarm(evt.level, evt.mag, evt.place);
+        triggerAlarm(evt.level, evt.mag, evt.place, true);
         break; // Only alarm for the most significant new event
       }
     }
@@ -1109,6 +1191,9 @@ function timeSince(epochMs) {
 function initMap() {
   map = L.map('map').setView([CARACAS.lat, CARACAS.lon], 7);
 
+  // Clear selected event when clicking empty map area
+  map.on('click', function() { if (selectedEventId) { selectedEventId = null; updateMap(); } });
+
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OSM, CARTO', maxZoom: 18
   }).addTo(map);
@@ -1127,28 +1212,177 @@ function initMap() {
     radius: 400000, color: '#ff8800', fillOpacity: 0, weight: 1, dashArray: '6,4', opacity: 0.2
   }).addTo(map).bindPopup(t('moderateZone'));
 
-  // San Sebastian Fault
-  L.polyline([
-    [10.5,-69.5],[10.48,-68.5],[10.5,-67.5],[10.5,-66.9],[10.5,-66],[10.5,-65]
-  ], { color: '#ff6600', weight: 2, opacity: 0.6 }).addTo(map).bindPopup(t('sanSebastian'));
+  // ── FAULT SYSTEM & PLATE BOUNDARIES (toggleable layer group) ──
+  window._faultLayer = L.layerGroup();
 
-  // SeedLink station markers (triangles via divIcon)
-  const stations = [
-    { id:'IU.SDV', lat:8.887, lon:-70.634, name:'Santo Domingo, VE', color:'#22cc44' },
-    { id:'IU.SJG', lat:18.109, lon:-66.150, name:'San Juan, PR', color:'#cc88ff' },
-    { id:'CU.GRTK', lat:21.515, lon:-71.133, name:'Grand Turk', color:'#44aaff' },
-    { id:'CU.BCIP', lat:9.171, lon:-79.837, name:'Barro Colorado, PA', color:'#8888ff' },
-    { id:'CM.BAR2', lat:10.880, lon:-74.833, name:'Barranquilla, CO', color:'#ff88cc' },
+  L.polyline([
+    [11.05,-70.2],[10.95,-69.8],[10.80,-69.3],[10.65,-68.8],[10.55,-68.3],
+    [10.50,-67.8],[10.50,-67.3],[10.50,-66.9],[10.50,-66.5],[10.50,-66.0],
+  ], { color: '#ff6600', weight: 3, opacity: 0.7 }).addTo(window._faultLayer)
+    .bindPopup('<strong style="color:#ff6600">FALLA DE SAN SEBASTIAN</strong><br>Dextral strike-slip<br>~2 cm/yr | Amenaza directa a Caracas<br><em>Pasa ~15 km al norte de Caracas</em>');
+
+  L.polyline([
+    [7.50,-72.40],[7.80,-72.00],[8.10,-71.50],[8.40,-71.10],[8.70,-70.80],
+    [8.88,-70.63],[9.10,-70.30],[9.35,-69.90],[9.55,-69.55],[9.75,-69.25],
+    [9.90,-69.00],[10.05,-68.60],[10.15,-68.20],[10.30,-67.80],[10.40,-67.40],
+  ], { color: '#ff4400', weight: 3, opacity: 0.65 }).addTo(window._faultLayer)
+    .bindPopup('<strong style="color:#ff4400">FALLA DE BOCONO</strong><br>Dextral strike-slip, Andes venezolanos<br>~1-2 cm/yr | 500+ km de longitud<br><em>M7.2/M7.5 junio 2026 — junction Bocono-San Sebastian</em>');
+
+  L.polyline([
+    [10.50,-66.00],[10.45,-65.50],[10.40,-65.00],[10.35,-64.50],[10.38,-64.00],
+    [10.42,-63.50],[10.48,-63.00],[10.52,-62.50],[10.58,-62.00],[10.62,-61.50],
+    [10.68,-61.00],[10.72,-60.80],
+  ], { color: '#ff8800', weight: 3, opacity: 0.65 }).addTo(window._faultLayer)
+    .bindPopup('<strong style="color:#ff8800">FALLA DE EL PILAR</strong><br>Dextral strike-slip, costa oriental<br>Hasta Trinidad | ~350 km');
+
+  L.polyline([
+    [11.20,-72.80],[11.10,-72.30],[11.00,-71.80],[10.90,-71.30],[10.85,-70.80],
+    [10.80,-70.30],[10.80,-69.80],
+  ], { color: '#cc5500', weight: 2, opacity: 0.5, dashArray: '8,4' }).addTo(window._faultLayer)
+    .bindPopup('<strong style="color:#cc5500">FALLA OCA-ANCON</strong><br>Strike-slip, Zulia/Falcon<br>Amenaza secundaria');
+
+  L.polyline([
+    [10.70,-60.80],[11.20,-61.00],[11.80,-61.20],[12.50,-61.30],[13.20,-61.00],
+    [14.00,-60.80],[14.80,-60.90],[15.50,-61.20],[16.20,-61.40],[17.00,-61.80],
+    [17.50,-62.50],[18.00,-63.50],[18.50,-64.50],[19.00,-65.50],[19.30,-66.50],
+    [19.50,-67.50],[19.50,-68.50],[19.30,-69.50],[19.00,-70.50],[18.50,-71.50],
+  ], { color: '#4466ff', weight: 2, opacity: 0.35, dashArray: '10,6' }).addTo(window._faultLayer)
+    .bindPopup('<strong style="color:#4466ff">LIMITE PLACA CARIBE / SUDAMERICANA</strong><br>Zona de subduccion (Antillas Menores)<br>Placa Caribe se mueve ~2 cm/yr al este');
+
+  L.marker([10.45, -67.4], {
+    icon: L.divIcon({ className:'ghost-label',
+      html:'<span style="color:#ff2200;font-size:9px;font-weight:700;font-family:monospace;text-shadow:0 0 4px #000,0 0 8px #000;white-space:nowrap;background:rgba(0,0,0,0.6);padding:1px 4px;border-radius:3px;">JUNCTION Bocono-San Sebastian</span>',
+      iconSize:[180,14], iconAnchor:[90,7] }), interactive:false,
+  }).addTo(window._faultLayer);
+
+  L.marker([10.50, -66.0], {
+    icon: L.divIcon({ className:'ghost-label',
+      html:'<span style="color:#ff8800;font-size:9px;font-weight:700;font-family:monospace;text-shadow:0 0 4px #000,0 0 8px #000;white-space:nowrap;background:rgba(0,0,0,0.6);padding:1px 4px;border-radius:3px;">San Sebastian → El Pilar</span>',
+      iconSize:[160,14], iconAnchor:[80,7] }), interactive:false,
+  }).addTo(window._faultLayer);
+
+  // Show/hide based on saved preference (default: visible)
+  if (localStorage.getItem('showFaults') !== 'false') {
+    window._faultLayer.addTo(map);
+  }
+
+  // SeedLink station markers — comprehensive fault system coverage
+  // Sorted by distance from Caracas. Covers San Sebastian, Bocono, El Pilar faults.
+  const ALL_STATIONS = [
+    // --- Near Caracas (<100 km) ---
+    { id:'VE.FUNV', lat:10.4693, lon:-66.8102, name:'FUNVISIS, Caracas', dist:10, color:'#ff2222', fault:'all', primary:true },
+    { id:'VE.TACV', lat:10.1381, lon:-67.0267, name:'Tacata, Miranda', dist:43, color:'#ff3333', fault:'bocono', primary:true },
+    { id:'VE.BIRV', lat:10.4757, lon:-66.2692, name:'Birongo, Miranda', dist:69, color:'#ff4444', fault:'elpilar', primary:true },
+    { id:'VE.BENV', lat:9.9623, lon:-67.5988, name:'Belen, Carabobo', dist:97, color:'#ff5544', fault:'bocono', primary:true },
+    // --- 100-200 km ---
+    { id:'VE.TURV', lat:10.4495, lon:-67.8395, name:'Turiamo, Carabobo', dist:103, color:'#ff6644', fault:'sansebastian', primary:true },
+    { id:'VE.CUPV', lat:10.0639, lon:-65.8056, name:'Cupira, Miranda', dist:129, color:'#ff7744', fault:'elpilar', primary:true },
+    { id:'VE.TINV', lat:10.2000, lon:-68.2000, name:'Tinaco, Cojedes', dist:146, color:'#ff8844', fault:'inland', primary:true },
+    { id:'VE.MERV', lat:9.2617, lon:-66.2972, name:'Mercedes, Guarico', dist:153, color:'#ff9944', fault:'south', primary:true },
+    { id:'VE.ORCV', lat:11.8124, lon:-66.1937, name:'Orchila (isla)', dist:165, color:'#ffaa44', fault:'offshore', primary:true },
+    // --- 200-300 km ---
+    { id:'VE.BAUV', lat:8.9433, lon:-68.0415, name:'Barinitas, Barinas', dist:214, color:'#ffbb44', fault:'bocono', primary:true },
+    { id:'VE.JACV', lat:11.0873, lon:-68.8299, name:'Jacuque, Falcon', dist:221, color:'#ffcc44', fault:'sansebastian', primary:true },
+    { id:'VE.PCRV', lat:10.1633, lon:-64.5896, name:'Pto. La Cruz, Anzoategui', dist:255, color:'#ddcc44', fault:'elpilar', primary:true },
+    { id:'VE.TERV', lat:9.9638, lon:-69.1918, name:'El Tocuyo, Lara', dist:258, color:'#cccc44', fault:'bocono', primary:true },
+    { id:'VE.IBAV', lat:11.8216, lon:-64.5977, name:'Margarita (isla)', dist:291, color:'#bbcc44', fault:'offshore', primary:true },
+    // --- 300-500 km ---
+    { id:'VE.MACV', lat:10.9767, lon:-64.1782, name:'Macanao, Margarita', dist:302, color:'#aacc44', fault:'offshore', primary:true },
+    { id:'VE.SANV', lat:9.5010, lon:-69.5365, name:'Sanare, Lara', dist:309, color:'#99cc44', fault:'bocono', primary:true },
+    { id:'VE.SIQV', lat:10.6489, lon:-69.8079, name:'Siquisique, Lara', dist:318, color:'#88cc44', fault:'sansebastian', primary:true },
+    { id:'VE.CUNV', lat:10.1777, lon:-64.0000, name:'Cumana, Sucre', dist:319, color:'#77cc44', fault:'elpilar', primary:true },
+    { id:'VE.CURV', lat:10.0128, lon:-69.9611, name:'Curarigua, Lara', dist:339, color:'#66cc44', fault:'bocono', primary:true },
+    { id:'VE.XCAR', lat:10.4929, lon:-63.5537, name:'Carupano, Sucre', dist:366, color:'#55cc44', fault:'elpilar', primary:true },
+    { id:'VE.QARV', lat:10.2061, lon:-70.5234, name:'Quibor, Lara', dist:398, color:'#44cc44', fault:'bocono', primary:true },
+    { id:'VE.CRUV', lat:10.6165, lon:-63.1842, name:'Carupano W, Sucre', dist:406, color:'#44cc55', fault:'elpilar', primary:true },
+    { id:'PR.ACPR', lat:12.5057, lon:-70.0011, name:'Curacao (isla)', dist:405, color:'#44bbff', fault:'offshore' },
+    { id:'VE.DABV', lat:10.9219, lon:-70.6362, name:'Dabajuro, Falcon', dist:411, color:'#44cc66', fault:'sansebastian', primary:true },
+    { id:'VE.ORIV', lat:9.0696, lon:-63.4180, name:'Orinoco, Bolivar', dist:413, color:'#44cc77', fault:'south', primary:true },
+    { id:'VE.ITEV', lat:11.3552, lon:-63.1320, name:'Isla Testigos', dist:422, color:'#44cc88', fault:'offshore', primary:true },
+    { id:'VE.GUNV', lat:10.1449, lon:-62.9426, name:'Guiria, Sucre', dist:435, color:'#44cc99', fault:'elpilar', primary:true },
+    { id:'VE.XYAG', lat:10.5686, lon:-62.8270, name:'Yaguaraparo, Sucre', dist:445, color:'#44ccaa', fault:'elpilar', primary:true },
+    { id:'IU.SDV',  lat:8.8839, lon:-70.6340, name:'Santo Domingo, Merida', dist:447, color:'#22cc44', fault:'bocono', primary:true },
+    // --- 500-700 km ---
+    { id:'VE.SOCV', lat:8.2842, lon:-70.8566, name:'Socopo, Barinas', dist:499, color:'#44ccbb', fault:'bocono', primary:true },
+    { id:'VE.GUIV', lat:10.6377, lon:-62.2082, name:'Guiria E, Sucre', dist:513, color:'#44cccc', fault:'elpilar', primary:true },
+    { id:'VE.VIGV', lat:8.8401, lon:-71.3642, name:'Vigia, Merida', dist:523, color:'#44bbcc', fault:'bocono', primary:true },
+    { id:'CU.GRGR', lat:12.1324, lon:-61.6541, name:'Grenada (isla)', dist:600, color:'#44aadd', fault:'caribbean' },
+    { id:'VE.MCQV', lat:10.0500, lon:-72.5350, name:'Machiques, Zulia', dist:619, color:'#44aacc', fault:'bocono', primary:true },
+    { id:'VE.CAPV', lat:7.8649, lon:-72.3143, name:'Capacho, Tachira', dist:663, color:'#44aacc', fault:'bocono', primary:true },
+    // --- 700-1000 km ---
+    { id:'CM.OCA',  lat:8.2399, lon:-73.3194, name:'Ocana, Colombia', dist:748, color:'#cc88dd', fault:'bocono' },
+    { id:'CU.BBGH', lat:13.1434, lon:-59.5588, name:'Barbados (isla)', dist:851, color:'#8888ee', fault:'caribbean' },
+    { id:'IU.SJG',  lat:18.1091, lon:-66.1500, name:'San Juan, PR', dist:850, color:'#cc88ff', fault:'caribbean' },
+    { id:'CM.BAR2', lat:10.8800, lon:-74.8330, name:'Barranquilla, CO', dist:868, color:'#ff88cc', fault:'sansebastian' },
+    // --- >1000 km (reference) ---
+    { id:'CU.GRTK', lat:21.5150, lon:-71.1330, name:'Grand Turk', dist:1100, color:'#44aaff', fault:'caribbean' },
+    { id:'CU.BCIP', lat:9.1710, lon:-79.8370, name:'Barro Colorado, PA', dist:1700, color:'#8888ff', fault:'caribbean' },
   ];
-  stations.forEach(s => {
+
+  // Initialize station map markers and management
+  window._stationMapMarkers = {};
+  window._allStationData = ALL_STATIONS;
+  // Populate STATION_INFO for seismogram display
+  ALL_STATIONS.forEach(s => {
+    STATION_INFO[s.id] = { name: s.name, dist: s.dist, color: s.color };
+  });
+  ALL_STATIONS.forEach(s => {
     const icon = L.divIcon({
       className:'',
       html:`<svg width="14" height="14" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="${s.color}" opacity="0.7" stroke="${s.color}" stroke-width="1"/></svg>`,
       iconSize:[14,14], iconAnchor:[7,13],
     });
-    L.marker([s.lat, s.lon], { icon }).addTo(map)
-      .bindPopup(`<strong>${s.id}</strong><br>${s.name}<br>${t('seedlinkStation')}`);
+    const m = L.marker([s.lat, s.lon], { icon }).addTo(map)
+      .bindPopup(`<strong>${s.id}</strong><br>${s.name}<br>${s.dist} km ${t('distCaracas')}<br>${s.fault ? s.fault.replace('sansebastian','San Sebastian').replace('bocono','Bocono').replace('elpilar','El Pilar').replace('all','Todas').replace('offshore','Offshore').replace('south','Sur').replace('inland','Interior').replace('caribbean','Caribe') : ''}`);
+    window._stationMapMarkers[s.id] = { marker: m, lat: s.lat, lon: s.lon, color: s.color, dist: s.dist, name: s.name };
   });
+  initStationManager();
+
+  // Sync faults checkbox with localStorage
+  const chkF = document.getElementById('chkFaults');
+  if (chkF && localStorage.getItem('showFaults') === 'false') chkF.checked = false;
+
+  // --- Magnitude legend (bottom-left corner of map) ---
+  const legendDiv = L.control({ position: 'bottomleft' });
+  legendDiv.onAdd = function() {
+    const d = L.DomUtil.create('div', 'map-legend');
+    d.style.cssText = 'background:rgba(10,12,16,0.9);border:1px solid #1e2230;border-radius:6px;padding:8px 10px;font-size:11px;font-family:monospace;color:#ccc;line-height:1.6;pointer-events:auto;';
+    d.innerHTML = `
+      <div style="font-weight:700;color:#44aaff;margin-bottom:4px;">ESCALA / SCALE</div>
+      <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#44aaff;margin-right:4px;vertical-align:middle;"></span> M3 — ${currentLang==='es'?'Débil':'Weak'}</div>
+      <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffcc00;margin-right:4px;vertical-align:middle;"></span> M4 — ${currentLang==='es'?'Leve':'Light'}</div>
+      <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff8800;margin-right:4px;vertical-align:middle;"></span> M5 — ${currentLang==='es'?'Moderado':'Moderate'}</div>
+      <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff0000;margin-right:4px;vertical-align:middle;"></span> M6+ — ${currentLang==='es'?'Fuerte/Severo':'Strong/Severe'}</div>
+      <div style="border-top:1px solid #333;margin-top:4px;padding-top:4px;font-weight:700;color:#00ff88;">CARACAS MMI</div>
+      <div style="color:#22cc44;">I-II — ${currentLang==='es'?'No sentido':'Not felt'}</div>
+      <div style="color:#88cc00;">III — ${currentLang==='es'?'Vibraciones leves':'Slight vibrations'}</div>
+      <div style="color:#ffcc00;">IV — ${currentLang==='es'?'Objetos se mueven':'Objects rattle'}</div>
+      <div style="color:#ff8800;">V — ${currentLang==='es'?'Todos lo sienten':'Felt by all'}</div>
+      <div style="color:#ff4400;">VI — ${currentLang==='es'?'Difícil estar de pie':'Hard to stand'}</div>
+      <div style="color:#ff0000;">VII+ — ${currentLang==='es'?'Daños estructurales':'Structural damage'}</div>
+      <div style="border-top:1px solid #333;margin-top:4px;padding-top:4px;">
+        <span style="display:inline-block;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:8px solid #22cc44;margin-right:4px;vertical-align:middle;"></span> ${currentLang==='es'?'Estación sísmica':'Seismic station'}
+      </div>
+    `;
+    return d;
+  };
+  legendDiv.addTo(map);
+
+  // --- Caracas impact box (top-right corner of map, shows current MMI) ---
+  const caracasBox = L.control({ position: 'topright' });
+  caracasBox.onAdd = function() {
+    const d = L.DomUtil.create('div', 'caracas-mmi-box');
+    d.id = 'caracasMMIBox';
+    d.style.cssText = 'background:rgba(10,12,16,0.92);border:1px solid #00ff88;border-radius:8px;padding:10px 14px;font-family:monospace;text-align:center;min-width:140px;pointer-events:auto;';
+    d.innerHTML = `
+      <div style="font-size:10px;color:#00ff88;font-weight:700;letter-spacing:1px;">CARACAS</div>
+      <div id="caracasMMIValue" style="font-size:28px;font-weight:700;color:#22cc44;margin:2px 0;">—</div>
+      <div id="caracasMMIDesc" style="font-size:10px;color:#888;">MMI</div>
+      <div id="caracasMMIPGA" style="font-size:9px;color:#666;margin-top:2px;"></div>
+    `;
+    return d;
+  };
+  caracasBox.addTo(map);
 }
 
 // Ghost ring animation state
@@ -1156,6 +1390,16 @@ let ghostRings = [];
 let ghostAnimFrame = null;
 
 function updateMap() {
+  // Save currently open popup so we can re-open it after marker recreation
+  let openPopupLatLng = null;
+  let openPopupContent = null;
+  eventMarkers.forEach(m => {
+    if (m.getPopup && m.getPopup() && m.getPopup().isOpen()) {
+      openPopupLatLng = m.getLatLng();
+      openPopupContent = m.getPopup().getContent();
+    }
+  });
+
   // Remove old markers (keep ghost rings separate)
   eventMarkers.forEach(m => map.removeLayer(m));
   eventMarkers = [];
@@ -1181,17 +1425,23 @@ function updateMap() {
     // Scale radius slightly by ghosting — fresh events appear bigger
     const ghostR = r * (1 + (1 - ageFraction) * 0.5);
 
+    // Shaking color for popup
+    const mmiC = e.mmi >= 7 ? '#ff0000' : e.mmi >= 6 ? '#ff4400' : e.mmi >= 5 ? '#ff8800' :
+                 e.mmi >= 4 ? '#ffcc00' : e.mmi >= 3 ? '#88cc00' : e.mmi >= 2 ? '#66aa00' : '#446600';
     const marker = L.circleMarker([e.lat, e.lon], {
       radius: ghostR, color, fillColor: color,
       fillOpacity: fillGhostOpacity,
       opacity: ghostOpacity,
       weight: strokeWeight,
     }).addTo(map).bindPopup(
-      `<strong>M${e.mag.toFixed(1)}</strong><br>${e.place}<br>` +
-      `<span style="color:#888">${new Date(e.time).toISOString().replace('T',' ').slice(0,19)} UTC</span><br>` +
-      `${timeSince(e.time)}<br>` +
-      `${t('depth')}: ${e.depth} km | ${t('distCaracas')}: ${e.distKm} km<br>` +
-      `${t('pgaBasin')}: ${e.pga_basin.toFixed(1)} gal | MMI: ${e.mmi.toFixed(0)} (${e.mmiDesc})`
+      `<strong style="font-size:1.3em">M${e.mag.toFixed(1)}</strong> <span style="color:#888">${e.source || ''}</span><br>` +
+      `${e.place}<br>` +
+      `<span style="color:#888">${new Date(e.time).toISOString().replace('T',' ').slice(0,19)} UTC — ${timeSince(e.time)}</span><br>` +
+      `${t('depth')}: ${e.depth} km | ${t('distCaracas')}: <strong>${e.distKm} km</strong><br>` +
+      `<div style="margin-top:4px;padding:4px 6px;border-radius:4px;background:rgba(0,0,0,0.3);border:1px solid ${mmiC}">` +
+      `<strong style="color:${mmiC};font-size:1.1em">CARACAS: MMI ${e.mmi.toFixed(0)} — ${e.mmiDesc}</strong><br>` +
+      `PGA: ${e.pga_basin.toFixed(1)} gal | S-wave: ~${e.swave}s</div>`,
+      { maxWidth: 320 }
     );
     eventMarkers.push(marker);
 
@@ -1208,42 +1458,48 @@ function updateMap() {
       eventMarkers.push(lbl);
     }
 
-    // Isoseismal felt radius circles — hold solid during alarm, then 30s fade-out
+    // Isoseismal felt radius circles — show for:
+    // 1. Active alarms (with 30s fade-out after alarm ends)
+    // 2. User-selected event (clicked in event list — always solid)
     if (showFeltCircles && e.mag >= 3.0 && e.source !== 'seedlink') {
+      const isSelected = selectedEventId && e.id === selectedEventId;
       const alarmActive = (now - lastAlarmTime) < alarmDurationMs;
       const FADE_DURATION = 30000;
       const alarmEndTime = lastAlarmTime + alarmDurationMs;
       const timeSinceAlarmEnd = alarmActive ? 0 : (now - alarmEndTime);
       const maxShowTime = alarmDurationMs + FADE_DURATION;
-      const shouldShow = alarmActive || age <= maxShowTime;
+      const shouldShow = isSelected || alarmActive || age <= maxShowTime;
 
       if (shouldShow) {
         let fadeFraction = 0;
-        if (!alarmActive && timeSinceAlarmEnd > 0) {
+        if (isSelected) {
+          fadeFraction = 0; // Always solid for selected event
+        } else if (!alarmActive && timeSinceAlarmEnd > 0) {
           fadeFraction = Math.min(1, timeSinceAlarmEnd / FADE_DURATION);
         }
         // Fade based on event age if no alarm was triggered for this event
-        if (lastAlarmTime < e.time - 5000) {
+        if (!isSelected && lastAlarmTime < e.time - 5000) {
           fadeFraction = Math.min(1, age / FADE_DURATION);
         }
 
         if (fadeFraction < 1) {
           const feltRadii = calculateFeltRadii(e.mag);
-          const circleOpacity = Math.max(0, 0.5 * (1 - fadeFraction));
-          const fillOp = Math.max(0, 0.15 * (1 - fadeFraction));
+          const circleOpacity = isSelected ? 0.6 : Math.max(0, 0.5 * (1 - fadeFraction));
+          const fillOp = isSelected ? 0.12 : Math.max(0, 0.15 * (1 - fadeFraction));
           feltRadii.forEach(fr => {
             const fc = L.circle([e.lat, e.lon], {
               radius: fr.radiusKm * 1000,
               color: fr.color,
               fillColor: fr.color,
               fillOpacity: fillOp,
-              weight: Math.max(0.5, 2 * (1 - fadeFraction)),
+              weight: isSelected ? 2.5 : Math.max(0.5, 2 * (1 - fadeFraction)),
               opacity: circleOpacity,
               dashArray: fr.mmi <= 3 ? '4 4' : null,
             }).addTo(map).bindPopup(
               `<strong>M${e.mag.toFixed(1)}</strong> — ${fr.label}<br>` +
               `${t('radius')}: ${Math.round(fr.radiusKm)} km<br>` +
-              `<span style="color:#888">${e.place}</span>`
+              `<span style="color:#888">${e.place}</span>`,
+              { maxWidth: 280 }
             );
             eventMarkers.push(fc);
           });
@@ -1255,7 +1511,69 @@ function updateMap() {
     if (e.isNew && age < 600000 && e.mag >= 3.0) {
       startGhostRing(e.lat, e.lon, color, e.mag);
     }
+
+    // --- Caracas MMI label on event marker (what Caracas feels) ---
+    if (e.mmi >= 2.0 && age < 6 * 3600000 && e.mag >= 3.0) {
+      const mmiColor = e.mmi >= 7 ? '#ff0000' : e.mmi >= 6 ? '#ff4400' : e.mmi >= 5 ? '#ff8800' :
+                        e.mmi >= 4 ? '#ffcc00' : e.mmi >= 3 ? '#88cc00' : '#666';
+      const mmiLabel = L.divIcon({
+        className: 'ghost-label',
+        html: `<span style="color:${mmiColor};font-size:9px;font-family:monospace;text-shadow:0 0 3px #000,0 0 6px #000;white-space:nowrap;background:rgba(0,0,0,0.7);padding:1px 3px;border-radius:2px;border:1px solid ${mmiColor};">CCS: MMI ${e.mmi.toFixed(0)} (${e.mmiDesc})</span>`,
+        iconSize: [120, 16],
+        iconAnchor: [-ghostR-2, -8],
+      });
+      const mmiLbl = L.marker([e.lat, e.lon], { icon: mmiLabel, interactive: false }).addTo(map);
+      eventMarkers.push(mmiLbl);
+    }
   });
+
+  // --- Update Caracas MMI box with most significant recent event ---
+  updateCaracasMMIBox();
+
+  // Re-open popup that was open before marker recreation
+  if (openPopupLatLng) {
+    eventMarkers.forEach(m => {
+      if (m.getLatLng && m.getPopup) {
+        const ll = m.getLatLng();
+        if (Math.abs(ll.lat - openPopupLatLng.lat) < 0.001 &&
+            Math.abs(ll.lng - openPopupLatLng.lng) < 0.001 &&
+            m.getPopup()) {
+          m.openPopup();
+        }
+      }
+    });
+  }
+}
+
+// --- Update the Caracas MMI box on the map ---
+function updateCaracasMMIBox() {
+  const box = document.getElementById('caracasMMIBox');
+  if (!box) return;
+  const valEl = document.getElementById('caracasMMIValue');
+  const descEl = document.getElementById('caracasMMIDesc');
+  const pgaEl = document.getElementById('caracasMMIPGA');
+  if (!valEl) return;
+
+  // Find most significant recent event (< 1h, highest MMI at Caracas)
+  const now = Date.now();
+  const recent = allEvents.filter(e => !e.isWaveformAlert && (now - e.time) < 3600000 && e.mmi >= 1);
+  if (recent.length === 0) {
+    valEl.textContent = '—';
+    valEl.style.color = '#22cc44';
+    descEl.textContent = currentLang === 'es' ? 'Sin actividad' : 'No activity';
+    pgaEl.textContent = '';
+    box.style.borderColor = '#00ff88';
+    return;
+  }
+  const top = recent.reduce((a, b) => (a.mmi > b.mmi ? a : b));
+  const mmi = top.mmi;
+  const mmiColor = mmi >= 7 ? '#ff0000' : mmi >= 6 ? '#ff4400' : mmi >= 5 ? '#ff8800' :
+                    mmi >= 4 ? '#ffcc00' : mmi >= 3 ? '#88cc00' : '#22cc44';
+  valEl.textContent = `MMI ${mmi.toFixed(1)}`;
+  valEl.style.color = mmiColor;
+  descEl.innerHTML = `${top.mmiDesc} <span style="color:#666">| M${top.mag.toFixed(1)}</span>`;
+  pgaEl.textContent = `PGA: ${(top.pga_basin||0).toFixed(1)} gal | ${top.distKm} km | S: ${top.swave}s`;
+  box.style.borderColor = mmiColor;
 }
 
 function startGhostRing(lat, lon, color, mag) {
@@ -1370,6 +1688,15 @@ function toggleFeltCircles() {
   updateMap();
 }
 
+function toggleFaults() {
+  const show = document.getElementById('chkFaults').checked;
+  localStorage.setItem('showFaults', show ? 'true' : 'false');
+  if (window._faultLayer) {
+    if (show) window._faultLayer.addTo(map);
+    else map.removeLayer(window._faultLayer);
+  }
+}
+
 function switchLogTab(tab) {
   document.getElementById('tabEvents').className = 'log-tab' + (tab === 'events' ? ' active' : '');
   document.getElementById('tabWaveforms').className = 'log-tab' + (tab === 'waveforms' ? ' active' : '');
@@ -1381,6 +1708,22 @@ function toggleMaximize() {
   const panel = document.getElementById('eventPanel');
   panel.classList.toggle('maximized');
   setTimeout(() => { if (map) map.invalidateSize(); }, 350);
+}
+
+function panToEvent(lat, lon, zoom, eventId) {
+  if (map && lat && lon) {
+    selectedEventId = eventId || null;
+    map.flyTo([lat, lon], zoom || 8, { duration: 0.8 });
+    updateMap(); // redraw to show isoseismals for selected event
+  }
+}
+
+function panToStation(stationKey) {
+  const info = window._stationMapMarkers && window._stationMapMarkers[stationKey];
+  if (info) {
+    map.flyTo([info.lat, info.lon], 8, { duration: 0.8 });
+    info.marker.openPopup();
+  }
 }
 
 function buildEventItem(e) {
@@ -1413,6 +1756,10 @@ function buildEventItem(e) {
     <div>${e.place}</div>
     <div class="impact"><span style="color:#666">${utcTime}</span> | ${e.distKm||0} km | PGA: ${(e.pga_basin||0).toFixed(1)} gal | MMI: ${(e.mmi||0).toFixed(0)} (${e.mmiDesc||''}) | S: ${e.swave||0}s${feltStr}</div>
   `;
+
+  // Click to pan map to epicenter and show isoseismals
+  div.onclick = function() { panToEvent(e.lat, e.lon, e.mag >= 5 ? 7 : 8, e.id); };
+
   return div;
 }
 
@@ -1443,6 +1790,13 @@ function buildWaveformItem(e) {
     <div>${e.place}</div>
     <div class="impact"><span style="color:#666">${utcTime}</span> | CFT: ${(e.cft||0).toFixed(1)} | ${e.triggerStation || '?'}${coinStr}</div>
   `;
+
+  // Click to pan map to trigger station
+  div.onclick = function() {
+    const stKey = e.triggerStation ? getStationKey(e.triggerStation) : null;
+    if (stKey) panToStation(stKey);
+  };
+
   return div;
 }
 
@@ -1561,7 +1915,9 @@ function handleBackendEvent(msg) {
     // Only trigger alarm for RECENT events (< 5 min old) — don't alarm on historical data
     const eventAge = Date.now() - evt.time;
     if (evt.level !== 'none' && evt.level !== 'info' && eventAge < 300000) {
-      triggerAlarm(evt.level, evt.mag, `[${sourceTag}] ${evt.place}`);
+      // Confirmed = catalog source (EMSC/USGS) OR multi-station coincidence (2+ stations)
+      const isConfirmed = !isWaveformAlert || evt.coincidenceStations.length >= 2;
+      triggerAlarm(evt.level, evt.mag, `[${sourceTag}] ${evt.place}`, isConfirmed);
     }
   } else if (msg.action === 'update') {
     const existing = allEvents.find(x => x.id === e.id);
@@ -1578,7 +1934,10 @@ function handleBackendAlert(msg) {
   const e = msg.event;
   if (!e) return;
   const level = msg.level || 'medium';
-  triggerAlarm(level, e.mag, `[BACKEND ALERT] ${e.place || '?'}`);
+  // Backend alerts from AlarmManager — confirmed if multi-station or catalog source
+  const coincidence = e.coincidence_stations || [];
+  const isConfirmed = e.type !== 'waveform_alert' || coincidence.length >= 2;
+  triggerAlarm(level, e.mag, `[BACKEND ALERT] ${e.place || '?'}`, isConfirmed);
 }
 
 function handleBackendHistory(msg) {
@@ -1621,6 +1980,8 @@ function handleWaveform(msg) {
         drawSeismogram();
       });
     }
+    // Update station alarm markers on map when CFT changes
+    updateStationAlarmMarkers(null);
   }
 }
 
@@ -1818,6 +2179,98 @@ function handleBackendStatusMsg(msg) {
   if (usgsBeDot) {
     usgsBeDot.style.background = msg.usgs ? 'var(--green)' : 'var(--red)';
   }
+
+  // --- Update station markers on map based on CFT levels ---
+  updateStationAlarmMarkers(msg);
+}
+
+// Map station alarm rings — shows which stations are alarming
+let stationAlarmLayers = [];
+function updateStationAlarmMarkers(statusMsg) {
+  if (!map || !window._stationMapMarkers) return;
+
+  // Remove old alarm rings
+  stationAlarmLayers.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+  stationAlarmLayers = [];
+
+  // Get station CFT from waveform data
+  const stationCFTs = {};
+  Object.keys(waveformStations).forEach(fullId => {
+    const key = getStationKey(fullId);
+    const ws = waveformStations[fullId];
+    if (!stationCFTs[key] || ws.cft > stationCFTs[key]) {
+      stationCFTs[key] = ws.cft || 0;
+    }
+  });
+
+  // Also check backend status stations data
+  if (statusMsg && statusMsg.stations) {
+    Object.keys(statusMsg.stations).forEach(sid => {
+      const key = getStationKey(sid);
+      const cft = statusMsg.stations[sid]?.cft || 0;
+      if (!stationCFTs[key] || cft > stationCFTs[key]) {
+        stationCFTs[key] = cft;
+      }
+    });
+  }
+
+  Object.keys(stationCFTs).forEach(key => {
+    const info = window._stationMapMarkers[key];
+    if (!info) return;
+    const cft = stationCFTs[key];
+
+    // Skip disabled stations (user toggled off in station manager)
+    if (disabledStations.has(key)) return;
+
+    // Determine alarm state
+    let alarmColor, alarmRadius, alarmOpacity, label;
+    if (cft >= 5.0) {
+      alarmColor = '#ff0000'; alarmRadius = 25000; alarmOpacity = 0.5; label = 'CRITICAL';
+    } else if (cft >= 3.5) {
+      alarmColor = '#ff8800'; alarmRadius = 18000; alarmOpacity = 0.4; label = 'WARNING';
+    } else if (cft >= 2.5) {
+      alarmColor = '#ffcc00'; alarmRadius = 12000; alarmOpacity = 0.25; label = 'ELEVATED';
+    } else {
+      return; // No alarm — skip
+    }
+
+    // Pulsing alarm ring around station
+    const ring = L.circle([info.lat, info.lon], {
+      radius: alarmRadius, color: alarmColor, fillColor: alarmColor,
+      fillOpacity: alarmOpacity * 0.3, weight: 2, opacity: alarmOpacity,
+    }).addTo(map);
+    stationAlarmLayers.push(ring);
+
+    // Alarm label above station
+    const alarmLabel = L.divIcon({
+      className: 'ghost-label',
+      html: `<span style="color:${alarmColor};font-size:10px;font-weight:700;font-family:monospace;text-shadow:0 0 3px #000,0 0 6px #000;white-space:nowrap;background:rgba(0,0,0,0.8);padding:1px 4px;border-radius:3px;border:1px solid ${alarmColor};">⚡ ${key} CFT:${cft.toFixed(1)} ${label}</span>`,
+      iconSize: [160, 16],
+      iconAnchor: [80, 30],
+    });
+    const lbl = L.marker([info.lat, info.lon], { icon: alarmLabel, interactive: false }).addTo(map);
+    stationAlarmLayers.push(lbl);
+
+    // Update the triangle marker color to match alarm state
+    const newIcon = L.divIcon({
+      className:'',
+      html:`<svg width="18" height="18" viewBox="0 0 18 18"><polygon points="9,1 17,17 1,17" fill="${alarmColor}" opacity="0.9" stroke="${alarmColor}" stroke-width="2"/></svg>`,
+      iconSize:[18,18], iconAnchor:[9,17],
+    });
+    info.marker.setIcon(newIcon);
+  });
+
+  // Reset non-alarming stations to their default color
+  Object.keys(window._stationMapMarkers).forEach(key => {
+    if (stationCFTs[key] && stationCFTs[key] >= 2.5) return; // already handled
+    const info = window._stationMapMarkers[key];
+    const defaultIcon = L.divIcon({
+      className:'',
+      html:`<svg width="14" height="14" viewBox="0 0 14 14"><polygon points="7,1 13,13 1,13" fill="${info.color}" opacity="0.7" stroke="${info.color}" stroke-width="1"/></svg>`,
+      iconSize:[14,14], iconAnchor:[7,13],
+    });
+    info.marker.setIcon(defaultIcon);
+  });
 }
 
 function updateBackendStatus() {
@@ -1828,20 +2281,134 @@ function updateBackendStatus() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// STATION MANAGER — collapsible, sortable, enable/disable per station
+// ═══════════════════════════════════════════════════════════════════════════
+
+let disabledStations = new Set();
+let stationSortKey = 'dist';
+let stationSortAsc = true;
+
+function initStationManager() {
+  // Load disabled stations from localStorage
+  try {
+    const saved = localStorage.getItem('disabledStations');
+    if (saved) disabledStations = new Set(JSON.parse(saved));
+  } catch(e) {}
+  renderStationList();
+}
+
+function toggleStationMgr() {
+  const header = document.getElementById('stationMgrHeader');
+  const body = document.getElementById('stationMgrBody');
+  header.classList.toggle('collapsed');
+  body.classList.toggle('collapsed');
+}
+
+function sortStations(key, btn) {
+  if (stationSortKey === key) {
+    stationSortAsc = !stationSortAsc;
+  } else {
+    stationSortKey = key;
+    stationSortAsc = true;
+  }
+  // Update active button
+  document.querySelectorAll('.station-sort-bar button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderStationList();
+}
+
+function renderStationList() {
+  const container = document.getElementById('stationList');
+  if (!container || !window._allStationData) return;
+
+  const stations = [...window._allStationData];
+
+  // Sort
+  const cmp = (a, b) => {
+    let va, vb;
+    switch(stationSortKey) {
+      case 'id':   va = a.id; vb = b.id; break;
+      case 'name': va = a.name; vb = b.name; break;
+      case 'lat':  va = a.lat; vb = b.lat; break;
+      case 'lon':  va = a.lon; vb = b.lon; break;
+      case 'dist': default: va = a.dist; vb = b.dist; break;
+    }
+    if (typeof va === 'string') return stationSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    return stationSortAsc ? va - vb : vb - va;
+  };
+  stations.sort(cmp);
+
+  // Get live CFT values
+  const cfts = {};
+  Object.keys(waveformStations).forEach(fullId => {
+    const key = getStationKey(fullId);
+    const ws = waveformStations[fullId];
+    if (!cfts[key] || ws.cft > cfts[key]) cfts[key] = ws.cft || 0;
+  });
+
+  // Count active
+  const activeIds = new Set(Object.keys(waveformStations).map(getStationKey));
+  const activeEl = document.getElementById('stationActiveCount');
+  const totalEl = document.getElementById('stationTotalCount');
+  if (activeEl) activeEl.textContent = activeIds.size;
+  if (totalEl) totalEl.textContent = stations.length;
+
+  container.innerHTML = '';
+  stations.forEach(s => {
+    const isOnline = activeIds.has(s.id);
+    const cft = cfts[s.id] || 0;
+    const disabled = disabledStations.has(s.id);
+    const isAlarming = cft >= 2.5;
+
+    const row = document.createElement('div');
+    row.className = 'station-row' + (isAlarming ? ' alarming' : '') + (!isOnline ? ' offline' : '');
+
+    const cftColor = cft >= 5.0 ? 'var(--red)' : cft >= 3.5 ? 'var(--orange)' : cft >= 2.5 ? 'var(--yellow)' : '#444';
+    const cftText = isOnline ? cft.toFixed(1) : '--';
+
+    row.innerHTML = `
+      <input type="checkbox" ${disabled ? '' : 'checked'} data-station="${s.id}" onchange="toggleStationAlert(this)" title="${disabled ? 'Alerts OFF' : 'Alerts ON'}">
+      <span class="sid" style="color:${s.color}">${s.id}</span>
+      <span class="sname" title="${s.name} | ${s.fault || ''}">${s.name}</span>
+      <span class="sdist">${s.dist}km</span>
+      <span class="scft" style="color:${cftColor}" id="cft-${s.id.replace('.','_')}">${cftText}</span>
+    `;
+
+    // Click row (not checkbox) to pan map to station
+    row.addEventListener('click', function(ev) {
+      if (ev.target.tagName === 'INPUT') return;
+      if (map) map.flyTo([s.lat, s.lon], 8, { duration: 0.8 });
+      // Open popup
+      const info = window._stationMapMarkers[s.id];
+      if (info && info.marker) info.marker.openPopup();
+    });
+
+    container.appendChild(row);
+  });
+}
+
+function toggleStationAlert(checkbox) {
+  const stationId = checkbox.dataset.station;
+  if (checkbox.checked) {
+    disabledStations.delete(stationId);
+  } else {
+    disabledStations.add(stationId);
+  }
+  // Persist
+  try {
+    localStorage.setItem('disabledStations', JSON.stringify([...disabledStations]));
+  } catch(e) {}
+}
+
+// Periodically refresh station list CFTs (every 5s)
+setInterval(renderStationList, 5000);
+
+// ═══════════════════════════════════════════════════════════════════════════
 // LIVE SEISMOGRAM — MULTI-STATION STACKED VIEW
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Station metadata: distance to Caracas in km
-const STATION_INFO = {
-  'VE.FUNV': { name:'FUNVISIS, Caracas', dist:0, color:'#ff4444' },
-  'VE.GUIV': { name:'Guiria, VE', dist:500, color:'#ff8844' },
-  'VE.CURV': { name:'Curarigua, VE', dist:300, color:'#ffaa44' },
-  'IU.SDV':  { name:'Santo Domingo, VE', dist:440, color:'#22cc44' },
-  'CU.GRTK': { name:'Grand Turk', dist:1100, color:'#44aaff' },
-  'CU.BCIP': { name:'Barro Colorado, PA', dist:1700, color:'#8888ff' },
-  'IU.SJG':  { name:'San Juan, PR', dist:900, color:'#cc88ff' },
-  'CM.BAR2': { name:'Barranquilla, CO', dist:1100, color:'#ff88cc' },
-};
+// Station metadata — populated by initMap() after ALL_STATIONS is defined
+const STATION_INFO = {};
 
 function getStationKey(fullId) {
   const p = fullId.split('.');

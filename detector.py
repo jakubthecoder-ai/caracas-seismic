@@ -41,9 +41,15 @@ COOLDOWN_ELEVATED = 60.0    # seconds (raised from 30)
 COOLDOWN_WARNING = 120.0    # (raised from 60)
 COOLDOWN_CRITICAL = 180.0   # (raised from 120)
 
-# Primary stations: close to Caracas/Venezuela — single-station trigger OK
+# Primary stations: Venezuela + immediate neighbors — single-station trigger OK
 # All others: require coincidence with primary OR 2+ secondary triggers
-PRIMARY_STATION_PREFIXES = ('IU.SDV', 'VE.FUNV', 'VE.GUIV', 'VE.CURV', 'CM.BAR2')
+PRIMARY_STATION_PREFIXES = (
+    'VE.',       # All FUNVISIS stations in Venezuela
+    'IU.SDV',    # GSN Santo Domingo, Merida
+    'CM.BAR2',   # Barranquilla, Colombia (near border)
+    'CM.OCA',    # Ocana, Colombia (near border)
+    'PR.ACPR',   # ABC islands (Curacao)
+)
 
 
 class StationBuffer:
