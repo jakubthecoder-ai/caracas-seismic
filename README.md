@@ -66,15 +66,42 @@ docker compose down
 
 SQLite database is stored in a Docker volume (`seismic_data`). Events, waveform alerts, and station logs are retained for 7 days (auto-pruned hourly).
 
-### SeedLink Stations
+## SeedLink Station Network
 
-| Station | Network | Location | Dist to Caracas |
-|---------|---------|----------|-----------------|
-| SDV | IU | Santo Domingo, VE | ~440 km |
-| SJG | IU | San Juan, PR | ~900 km |
-| BAR2 | CM | Barranquilla, CO | ~1100 km |
-| GRTK | CU | Grand Turk | ~1100 km |
-| BCIP | CU | Barro Colorado, PA | ~1700 km |
+52 SeedLink subscriptions covering the Caracas fault system (San Sebastian, Bocono, El Pilar) within ~1000 km of Caracas. Stations are grouped by priority:
+
+### Required (GSN — always available on IRIS)
+
+| Station | Network | Location | Dist |
+|---------|---------|----------|------|
+| SDV | IU | Santo Domingo, Merida | 440 km |
+| SJG | IU | San Juan, Puerto Rico | 850 km |
+| BCIP | CU | Barro Colorado, Panama | 1700 km |
+| GRTK | CU | Grand Turk | 1100 km |
+
+### Venezuelan FUNVISIS Stations (30+ channels)
+
+Stations sorted by distance from Caracas, covering all three major fault segments:
+
+- **Near Caracas (<100 km):** FUNV (10 km), TACV (43 km), BIRV (69 km), BENV (97 km)
+- **100-300 km:** TURV, CUPV, TINV, MERV, ORCV, BAUV, JACV, PCRV, TERV, IBAV
+- **300-700 km:** MACV, SANV, SIQV, CUNV, CURV, XCAR, QARV, CRUV, DABV, ORIV, ITEV, GUNV, XYAG, GUIV, VIGV, SOCV, MCQV, CAPV
+
+Both BHZ and HHZ channels subscribed (many VE stations only have high-gain HHZ).
+
+### Regional Stations
+
+| Station | Network | Location | Dist |
+|---------|---------|----------|------|
+| BAR2 | CM | Barranquilla, Colombia | 868 km |
+| OCA | CM | Ocana, Colombia | 748 km |
+| ACPR | PR | Aruba/Curacao | 405 km |
+| GRGR | CU | Grenada | 600 km |
+| BBGH | CU | Barbados | 851 km |
+
+### False Positive Suppression
+
+Primary stations (VE.\*, IU.SDV, CM.BAR2, CM.OCA, PR.ACPR) can trigger single-station alerts. Distant stations require corroboration: a primary station also triggered, or 2+ stations in coincidence window (30s).
 
 ## Alarm Levels
 
@@ -84,23 +111,39 @@ Alarm severity is based on **predicted MMI at Caracas** using the Boore-Atkinson
 |-------|-----|--------|
 | Critical | >= 6.0 | Siren + screen flash + notification |
 | High | >= 5.0 | Siren + beeps + notification |
-| Medium | >= 4.0 | Beeps + yellow banner |
+| Medium | >= 4.0 | Beeps + banner |
 | Low | >= 3.0 | Single beep |
 | Info | >= 2.0 | Log only |
 
+### Confirmed vs Unconfirmed Alerts
+
+The threat banner uses color to indicate confirmation status:
+
+- **Red (CONFIRMED)** — catalog event from EMSC/USGS, or multi-station SeedLink coincidence (2+ stations)
+- **Yellow (UNCONFIRMED)** — single-station SeedLink trigger without corroboration
+
+Sound intensity is still based on severity level regardless of confirmation status.
+
 ## Frontend
 
-Single `index.html` file with built-in EN/ES language switcher. No build step required.
+Single `index.html` file with built-in EN/ES language switcher (no page reload). No build step required.
 
-Features:
-- Live seismogram display (all SeedLink stations)
-- Isoseismal felt radius circles (MMI II-VIII)
-- Tsunami coastal threat zone visualization (12 Caribbean zones)
-- Event log with catalog events + waveform alerts tabs
-- BA08 GMPE impact analysis for Caracas
-- Audio alerts (siren + beeps)
-- Browser notifications
-- Mobile-responsive with slidable panels
+### Features
+
+- **2-column layout** — always-visible map + sidebar with impact panel, stats, controls
+- **Live seismogram display** — all active SeedLink stations (BHZ waveforms)
+- **Isoseismal felt radius circles** — BA08 GMPE, MMI II-VIII with binary search for radius, persistent on click
+- **Tectonic fault lines** — San Sebastian, Bocono, El Pilar, Oca-Ancon faults + Caribbean plate boundary (toggleable)
+- **Station Manager** — collapsible panel, sortable (distance/code/city/lat/lon), per-station alert enable/disable with localStorage persistence
+- **Tsunami coastal threat zone** — 12 Caribbean zones from PTWC feed
+- **Event list** — catalog events + waveform alerts tabs, click to pan map to epicenter
+- **Caracas impact panel** — PGA, MMI, S-wave arrival estimate
+- **Progressive event ghosting** — 24h opacity decay on map markers
+- **Audio alerts** — siren + beeps, with test alarm button
+- **Browser notifications** — desktop push notifications for significant events
+- **Screen wake-lock** — prevents device sleep during monitoring
+- **Backend status indicators** — SSE, SeedLink, EMSC, USGS connection dots
+- **Mobile-responsive** — collapsible sidebar, touch-friendly controls
 
 ## License
 
